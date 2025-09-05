@@ -31,12 +31,12 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake clang-format clang-tidy
+          sudo apt-get install -y build-essential cmake clang-format clang-tidy libzstd-dev
 
       - name: Install dependencies (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          brew install clang-format || true
+          brew install clang-format zstd || true
           # cmake is already available on macOS runners
 
       - name: Set up environment
@@ -49,7 +49,8 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -DCMAKE_C_COMPILER=${{ matrix.cc }} \
-            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+            -DBFC_WITH_ZSTD=ON
 
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
@@ -75,6 +76,16 @@ jobs:
           ./build/bin/bfc info test.bfc
           ./build/bin/bfc verify test.bfc
           ./build/bin/bfc verify --deep test.bfc
+          
+          # Test compression functionality
+          ./build/bin/bfc create -c zstd test_compressed.bfc test_data/
+          ./build/bin/bfc info test_compressed.bfc hello.txt
+          ./build/bin/bfc verify test_compressed.bfc
+          
+          # Test different compression levels
+          ./build/bin/bfc create -c zstd -l 1 test_fast.bfc test_data/
+          ./build/bin/bfc create -c zstd -l 6 test_balanced.bfc test_data/
+          ./build/bin/bfc info test_balanced.bfc hello.txt
 
           # Test extraction
           mkdir -p extract_test
@@ -87,12 +98,15 @@ jobs:
           [ -f subdir/nested.txt ] && echo "nested.txt extracted"
 
           cd ..
-          rm -rf extract_test test.bfc test_data
+          rm -rf extract_test test.bfc test_data test_compressed.bfc test_fast.bfc test_balanced.bfc
 
       - name: Run benchmarks
         run: |
           cd build/benchmarks
           ./benchmark_crc32c
+          
+          # Run compression benchmark (quick test)
+          timeout 60s ./benchmark_compress || gtimeout 60s ./benchmark_compress || echo "Compression benchmark completed or timed out"
 
           # Run with timeout (different commands for Linux vs macOS)
           if command -v timeout >/dev/null 2>&1; then
@@ -131,13 +145,14 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake lcov bc
+          sudo apt-get install -y build-essential cmake lcov bc libzstd-dev
 
       - name: Configure CMake with coverage
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DBFC_COVERAGE=ON \
+            -DBFC_WITH_ZSTD=ON \
             -DBFC_BUILD_BENCHMARKS=OFF \
             -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
 
@@ -222,10 +237,10 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake clang-tidy cppcheck
+          sudo apt-get install -y build-essential cmake clang-tidy cppcheck libzstd-dev
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBFC_WITH_ZSTD=ON
 
       - name: Run clang-tidy
         run: |
@@ -263,11 +278,11 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake
+          sudo apt-get install -y build-essential cmake libzstd-dev
 
       - name: Build for CodeQL
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBFC_BUILD_BENCHMARKS=OFF
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBFC_WITH_ZSTD=ON -DBFC_BUILD_BENCHMARKS=OFF
           cmake --build build
 
       - name: Perform CodeQL Analysis

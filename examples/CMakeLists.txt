@@ -29,6 +29,14 @@ add_executable(extract_example extract_example.c)
 target_link_libraries(extract_example bfc)
 target_include_directories(extract_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
+# Link ZSTD if enabled (needed for static library dependencies)
+if(BFC_WITH_ZSTD)
+    foreach(target create_example read_example extract_example)
+        target_link_libraries(${target} ${ZSTD_LIBRARIES})
+        target_link_directories(${target} PRIVATE ${ZSTD_LIBRARY_DIRS})
+    endforeach()
+endif()
+
 # Install examples
 install(TARGETS create_example read_example extract_example
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/examples)

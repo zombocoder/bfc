@@ -40,7 +40,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake clang rpm
+          sudo apt-get install -y build-essential cmake clang rpm libzstd-dev
           # Install fpm for package creation
           sudo gem install fpm
 
@@ -48,8 +48,8 @@ jobs:
         if: matrix.platform == 'macos'
         run: |
           echo "cmake is already available on macOS runners"
-          # Install create-dmg for DMG creation
-          brew install create-dmg
+          # Install create-dmg for DMG creation and zstd for compression
+          brew install create-dmg zstd
 
       - name: Build Release
         env:
@@ -60,7 +60,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=${{ matrix.cc }} \
             -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
-            -DCMAKE_INSTALL_PREFIX=/usr/local
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DBFC_WITH_ZSTD=ON
 
           cmake --build build --config Release -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 

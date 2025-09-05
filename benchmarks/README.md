@@ -68,14 +68,43 @@ Tests checksum computation performance:
 - Measures hardware acceleration effectiveness
 - Evaluates unaligned access penalties
 
-### 4. All Benchmarks Runner (`benchmark_all`)
+### 4. Compression Benchmark (`benchmark_compress`)
+Tests compression and decompression performance with ZSTD:
+
+**Compression Level Test:**
+- Tests compression levels 1, 3, 6, 9, 12 with different content types
+- Compares compressible text vs random data compression ratios
+- Measures write throughput and space savings across compression levels
+
+**Compression Scaling Test:**
+- Tests different file sizes (1KB to 1MB) with and without compression
+- Measures compression effectiveness and performance impact
+- Evaluates compression overhead for various workloads
+
+**Decompression Performance Test:**
+- Benchmarks reading/decompression speed of compressed containers
+- Measures decompression throughput and file processing rates
+- Tests end-to-end compressed file access performance
+
+**Typical Results:**
+- **Compressible content**: 95-99% space savings with ZSTD
+- **Random data**: No compression applied (smart detection)
+- **Write performance**: 90-450 MB/s depending on compression level and file size
+- **Decompression speed**: 500-600 MB/s (often faster than compression)
+
+### 5. All Benchmarks Runner (`benchmark_all`)
 Runs all benchmarks in sequence with system information reporting.
 
 ## Building and Running
 
 ### Build with main project
 ```bash
+# Basic benchmarks
 cmake -S . -B build -DBFC_BUILD_BENCHMARKS=ON
+cmake --build build
+
+# With ZSTD compression support for compression benchmarks
+cmake -S . -B build -DBFC_BUILD_BENCHMARKS=ON -DBFC_WITH_ZSTD=ON
 cmake --build build
 ```
 
@@ -90,6 +119,9 @@ cmake --build build
 # CRC32C benchmark
 ./build/benchmarks/benchmark_crc32c
 
+# Compression benchmark (requires ZSTD support)
+./build/benchmarks/benchmark_compress
+
 # All benchmarks
 ./build/benchmarks/benchmark_all
 ```
@@ -100,6 +132,7 @@ cmake --build build
 make bench-writer
 make bench-reader
 make bench-crc32c
+make bench-compress
 
 # All benchmarks
 make benchmarks

@@ -30,19 +30,28 @@ typedef struct {
   const char* output_file;
   const char** input_paths;
   int num_inputs;
+  // Compression options
+  const char* compression;
+  int compression_level;
+  size_t compression_threshold;
 } create_options_t;
 
 static void print_create_help(void) {
   printf("Usage: bfc create [options] <container.bfc> <input-paths...>\n\n");
   printf("Create a new BFC container from files and directories.\n\n");
   printf("Options:\n");
-  printf("  -b, --block-size SIZE  Set block size (default: 4096)\n");
-  printf("  -f, --force            Overwrite existing container\n");
-  printf("  -h, --help             Show this help message\n\n");
+  printf("  -b, --block-size SIZE       Set block size (default: 4096)\n");
+  printf("  -f, --force                 Overwrite existing container\n");
+  printf("  -c, --compression TYPE      Compression type: none, zstd, auto (default: none)\n");
+  printf("  -l, --compression-level N   Compression level (1-22 for zstd, default: 3)\n");
+  printf("  -t, --compression-threshold SIZE  Min file size to compress (default: 64)\n");
+  printf("  -h, --help                  Show this help message\n\n");
   printf("Examples:\n");
   printf("  bfc create archive.bfc /path/to/files/\n");
   printf("  bfc create -f archive.bfc file1.txt file2.txt dir/\n");
   printf("  bfc create -b 8192 archive.bfc /home/user/documents/\n");
+  printf("  bfc create -c zstd -l 9 archive.bfc /data/\n");
+  printf("  bfc create -c auto -t 1024 archive.bfc /mixed/content/\n");
 }
 
 static int parse_create_options(int argc, char* argv[], create_options_t* opts) {
@@ -52,6 +61,10 @@ static int parse_create_options(int argc, char* argv[], create_options_t* opts) 
   opts->output_file = NULL;
   opts->input_paths = NULL;
   opts->num_inputs = 0;
+  // Compression defaults
+  opts->compression = "none";
+  opts->compression_level = 3;
+  opts->compression_threshold = 64;
 
   int i;
   for (i = 1; i < argc; i++) {
@@ -68,6 +81,38 @@ static int parse_create_options(int argc, char* argv[], create_options_t* opts) 
       opts->block_size = (uint32_t) atoi(argv[++i]);
       if (opts->block_size == 0 || opts->block_size > 1024 * 1024) {
         print_error("Block size must be between 1 and 1048576");
+        return -1;
+      }
+    } else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--compression") == 0) {
+      if (i + 1 >= argc) {
+        print_error("--compression requires an argument");
+        return -1;
+      }
+      opts->compression = argv[++i];
+      if (strcmp(opts->compression, "none") != 0 && strcmp(opts->compression, "zstd") != 0 &&
+          strcmp(opts->compression, "auto") != 0) {
+        print_error("Invalid compression type: %s (must be none, zstd, or auto)",
+                    opts->compression);
+        return -1;
+      }
+    } else if (strcmp(argv[i], "-l") == 0 || strcmp(argv[i], "--compression-level") == 0) {
+      if (i + 1 >= argc) {
+        print_error("--compression-level requires an argument");
+        return -1;
+      }
+      opts->compression_level = atoi(argv[++i]);
+      if (opts->compression_level < 1 || opts->compression_level > 22) {
+        print_error("Compression level must be between 1 and 22");
+        return -1;
+      }
+    } else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--compression-threshold") == 0) {
+      if (i + 1 >= argc) {
+        print_error("--compression-threshold requires an argument");
+        return -1;
+      }
+      opts->compression_threshold = (size_t) atol(argv[++i]);
+      if (opts->compression_threshold > 1024 * 1024) {
+        print_error("Compression threshold cannot exceed 1MB");
         return -1;
       }
     } else if (argv[i][0] == '-') {
@@ -231,11 +276,43 @@ int cmd_create(int argc, char* argv[]) {
   // Create container
   print_verbose("Creating container: %s (block size: %u)", opts.output_file, opts.block_size);
 
+  // Determine features based on compression setting
+  uint64_t features = 0;
+  uint8_t comp_type = BFC_COMP_NONE;
+
+  if (strcmp(opts.compression, "zstd") == 0) {
+    comp_type = BFC_COMP_ZSTD;
+    features |= BFC_FEATURE_ZSTD;
+  } else if (strcmp(opts.compression, "auto") == 0) {
+    // Auto mode will be handled per-file in the writer
+    comp_type = BFC_COMP_NONE; // Start with none, let writer decide
+  }
+
   bfc_t* writer = NULL;
-  result = bfc_create(opts.output_file, opts.block_size, 0, &writer);
+  result = bfc_create(opts.output_file, opts.block_size, features, &writer);
   if (result != BFC_OK) {
     print_error("Failed to create container '%s': %s", opts.output_file, bfc_error_string(result));
     return 1;
+  }
+
+  // Configure compression settings
+  if (strcmp(opts.compression, "none") != 0) {
+    result = bfc_set_compression(writer, comp_type, opts.compression_level);
+    if (result != BFC_OK) {
+      print_error("Failed to set compression: %s", bfc_error_string(result));
+      bfc_close(writer);
+      return 1;
+    }
+
+    result = bfc_set_compression_threshold(writer, opts.compression_threshold);
+    if (result != BFC_OK) {
+      print_error("Failed to set compression threshold: %s", bfc_error_string(result));
+      bfc_close(writer);
+      return 1;
+    }
+
+    print_verbose("Compression: %s (level: %d, threshold: %zu bytes)", opts.compression,
+                  opts.compression_level, opts.compression_threshold);
   }
 
   // Add input paths

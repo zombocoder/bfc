@@ -26,6 +26,12 @@ add_executable(bfc_cli ${BFC_CLI_SOURCES})
 
 target_link_libraries(bfc_cli bfc)
 
+# Link ZSTD if enabled (needed for static library dependencies)
+if(BFC_WITH_ZSTD)
+    target_link_libraries(bfc_cli ${ZSTD_LIBRARIES})
+    target_link_directories(bfc_cli PRIVATE ${ZSTD_LIBRARY_DIRS})
+endif()
+
 target_include_directories(bfc_cli PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src/lib
