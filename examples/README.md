@@ -159,6 +159,73 @@ static int process_entry(const bfc_entry_t *entry, void *user_data) {
 bfc_list(reader, NULL, process_entry, NULL);
 ```
 
+### Compression Configuration
+Configure compression settings when creating containers:
+
+```c
+#include <bfc.h>
+
+// Create container with compression
+bfc_t *writer;
+int result = bfc_create("archive.bfc", 4096, 0, &writer);
+if (result != BFC_OK) return 1;
+
+// Enable ZSTD compression (level 3)
+result = bfc_set_compression(writer, BFC_COMP_ZSTD, 3);
+if (result != BFC_OK) {
+    fprintf(stderr, "ZSTD compression not available\n");
+    // Fall back to no compression
+    bfc_set_compression(writer, BFC_COMP_NONE, 0);
+}
+
+// Only compress files larger than 1KB
+bfc_set_compression_threshold(writer, 1024);
+
+// Add files normally - compression is automatic
+FILE *file = fopen("large_file.txt", "rb");
+bfc_add_file(writer, "large_file.txt", file, 0644, 0, NULL);
+fclose(file);
+
+// Check current compression setting
+uint8_t comp_type = bfc_get_compression(writer);
+printf("Using compression: %s\n", bfc_compress_name(comp_type));
+
+bfc_finish(writer);
+bfc_close(writer);
+```
+
+**Compression workflow:**
+1. **Create container** with `bfc_create()`
+2. **Set compression** with `bfc_set_compression()` (optional)
+3. **Set threshold** with `bfc_set_compression_threshold()` (optional)
+4. **Add files normally** - BFC handles compression automatically
+5. **Files are compressed** based on content analysis and threshold
+6. **Extraction is transparent** - decompression happens automatically
+
+**Content analysis for automatic compression:**
+- Files with high zero content (>10% zeros)
+- Files with repetitive patterns (>20% repeated bytes)
+- Text-like content (>80% printable ASCII)
+- Files larger than threshold size (default: 64 bytes minimum)
+
+**Example: Checking compression effectiveness**
+```c
+// After adding files, check compression statistics
+bfc_entry_t entry;
+result = bfc_stat(reader, "large_file.txt", &entry);
+if (result == BFC_OK) {
+    double ratio = bfc_compress_ratio(entry.size, entry.obj_size);
+    printf("File: %s\n", entry.path);
+    printf("Original: %llu bytes\n", entry.size);
+    printf("Stored: %llu bytes\n", entry.obj_size);
+    printf("Compression: %s\n", bfc_compress_name(entry.comp));
+    printf("Storage ratio: %.1f%%\n", ratio);
+    if (entry.comp != BFC_COMP_NONE && entry.size > 0) {
+        printf("Space saved: %.1f%%\n", (1.0 - ratio/100.0) * 100.0);
+    }
+}
+```
+
 ## Compilation Notes
 
 When compiling your own programs that use BFC:
@@ -172,6 +239,11 @@ gcc $(pkg-config --cflags --libs bfc) your_program.c -o your_program
 ```
 
 Required headers:
-- `<bfc.h>` - Main BFC API
+- `<bfc.h>` - Main BFC API  
 - `<sys/stat.h>` - For file mode constants (S_IFREG, S_IFDIR, etc.)
 - `<fcntl.h>` - For file descriptor operations (when using extract_to_fd)
+
+**Compression support:**
+- Link with `-lzstd` if BFC was built with ZSTD support
+- Check for `BFC_WITH_ZSTD` macro or test `bfc_compress_is_supported(BFC_COMP_ZSTD)`
+- Compression functions are available via `<bfc.h>` (no separate header needed)

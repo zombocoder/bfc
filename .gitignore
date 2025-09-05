@@ -6,7 +6,6 @@ cmake-build-*/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
-Makefile
 *.cmake
 CTestTestfile.txt
 _deps/

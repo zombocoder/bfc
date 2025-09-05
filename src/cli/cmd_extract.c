@@ -180,16 +180,16 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
 
   // Extract file content
   int result = bfc_extract_to_fd(reader, entry->path, fd);
-  close(fd);
 
   if (result != BFC_OK) {
+    close(fd);
     print_error("Failed to extract file '%s': %s", entry->path, bfc_error_string(result));
     unlink(output_path); // Clean up partial file
     return -1;
   }
 
-  // Set file permissions and timestamps
-  if (chmod(output_path, entry->mode & 0777) != 0) {
+  // Set file permissions and timestamps using file descriptor to avoid TOCTOU race conditions
+  if (fchmod(fd, entry->mode & 0777) != 0) {
     print_verbose("Warning: cannot set permissions on '%s': %s", output_path, strerror(errno));
   }
 
@@ -200,9 +200,12 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
       // mtime
   };
 
-  if (utimensat(AT_FDCWD, output_path, times, 0) != 0) {
+  if (futimens(fd, times) != 0) {
     print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
   }
+
+  // Close file descriptor after setting metadata
+  close(fd);
 
   if (!g_options.quiet) {
     printf("Extracted: %s\n", output_path);

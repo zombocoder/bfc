@@ -12,6 +12,7 @@ A high-performance, single-file container format for storing files and directori
 - **Single-file containers** - Everything in one `.bfc` file
 - **POSIX metadata** - Preserves permissions, timestamps, and file types
 - **Fast random access** - O(log N) file lookup with sorted index
+- **Optional compression** - ZSTD compression with intelligent content analysis
 - **Integrity validation** - CRC32C checksums with hardware acceleration
 - **Cross-platform** - Works on Linux, macOS, and other Unix systems
 - **Crash-safe writes** - Atomic container creation with index at EOF
@@ -96,6 +97,40 @@ bfc create -b 8192 archive.bfc /data/
 # Force overwrite existing container
 bfc create -f archive.bfc /path/to/files/
 ```
+
+### Compression support
+
+BFC supports optional file compression to reduce storage space. When built with ZSTD support (`-DBFC_WITH_ZSTD=ON`), containers can automatically compress files based on content analysis.
+
+```bash
+# Enable ZSTD compression (default level: 3)
+bfc create -c zstd archive.bfc /path/to/files/
+
+# Set specific compression level (1-22, higher = better compression)
+bfc create -c zstd -l 6 archive.bfc /path/to/files/
+
+# Set compression threshold (only compress files larger than size)
+bfc create -c zstd -t 1024 archive.bfc /path/to/files/
+
+# Disable compression explicitly
+bfc create -c none archive.bfc /path/to/files/
+
+# View compression information
+bfc info archive.bfc path/to/file.txt
+# Shows:
+#   Compression: zstd
+#   Size: 1048576 bytes (1.0 MiB)
+#   Stored size: 524288 bytes (512.0 KiB)
+#   Storage ratio: 50.0%
+#   Compression ratio: 50.0%
+```
+
+**Compression behavior:**
+- **Automatic detection** - BFC analyzes file content to recommend compression
+- **Small file threshold** - Files smaller than 64 bytes are never compressed
+- **Content analysis** - Text files, repetitive data, and files with patterns compress well
+- **Transparent extraction** - Compressed files are automatically decompressed on extraction
+- **Integrity validation** - CRC32C checksums protect both original and compressed data
 
 ### Listing contents
 
