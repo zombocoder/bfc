@@ -54,6 +54,7 @@ endif()
 if(BFC_WITH_ZSTD)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(ZSTD REQUIRED libzstd)
+    message(STATUS "ZSTD compression support enabled")
 endif()
 
 # Include directories

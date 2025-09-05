@@ -15,6 +15,7 @@
  */
 
 #define _GNU_SOURCE
+#include "bfc_compress.h"
 #include "bfc_crc32c.h"
 #include "bfc_format.h"
 #include "bfc_os.h"
@@ -407,6 +408,83 @@ int bfc_list(bfc_t* r, const char* prefix_dir, bfc_list_cb cb, void* user) {
   return BFC_OK;
 }
 
+// Helper function to read and decompress a compressed file
+static size_t read_compressed_file(bfc_t* r, bfc_reader_entry_t* entry, uint64_t offset, void* buf,
+                                   size_t len) {
+  // Calculate content start position
+  if (bfc_os_seek(r->file, (int64_t) entry->obj_offset, SEEK_SET) != BFC_OK) {
+    return 0;
+  }
+
+  struct bfc_obj_hdr obj_hdr;
+  if (fread(&obj_hdr, 1, sizeof(obj_hdr), r->file) != sizeof(obj_hdr)) {
+    return 0;
+  }
+
+  // Skip name and padding to get to content
+  uint16_t name_len = obj_hdr.name_len;
+  if (fseek(r->file, name_len, SEEK_CUR) != 0) {
+    return 0;
+  }
+
+  // Align to 16-byte boundary
+  size_t hdr_name_size = sizeof(obj_hdr) + name_len;
+  size_t padding = bfc_padding_size(hdr_name_size, BFC_ALIGN);
+  if (padding > 0 && fseek(r->file, (long) padding, SEEK_CUR) != 0) {
+    return 0;
+  }
+
+  // Read compressed data
+  void* compressed_data = malloc(obj_hdr.enc_size);
+  if (!compressed_data) {
+    return 0;
+  }
+
+  size_t compressed_read = fread(compressed_data, 1, obj_hdr.enc_size, r->file);
+  if (compressed_read != obj_hdr.enc_size) {
+    free(compressed_data);
+    return 0;
+  }
+
+  // Decompress the data
+  bfc_decompress_result_t decomp_result =
+      bfc_decompress_data(entry->comp, compressed_data, obj_hdr.enc_size, obj_hdr.orig_size);
+
+  free(compressed_data);
+
+  if (decomp_result.error != BFC_OK || !decomp_result.data) {
+    return 0;
+  }
+
+  // Validate decompressed size
+  if (decomp_result.decompressed_size != obj_hdr.orig_size) {
+    free(decomp_result.data);
+    return 0;
+  }
+
+  // Validate CRC of decompressed data
+  bfc_crc32c_ctx_t crc_ctx;
+  bfc_crc32c_reset(&crc_ctx);
+  bfc_crc32c_update(&crc_ctx, decomp_result.data, decomp_result.decompressed_size);
+  uint32_t calculated_crc = bfc_crc32c_final(&crc_ctx);
+
+  if (calculated_crc != obj_hdr.crc32c) {
+    free(decomp_result.data);
+    return 0;
+  }
+
+  // Copy requested portion to output buffer
+  size_t copy_size = len;
+  if (offset + copy_size > decomp_result.decompressed_size) {
+    copy_size = decomp_result.decompressed_size - offset;
+  }
+
+  memcpy(buf, (uint8_t*) decomp_result.data + offset, copy_size);
+  free(decomp_result.data);
+
+  return copy_size;
+}
+
 size_t bfc_read(bfc_t* r, const char* container_path, uint64_t offset, void* buf, size_t len) {
   if (!r || !container_path || !buf || len == 0) {
     return 0;
@@ -439,9 +517,15 @@ size_t bfc_read(bfc_t* r, const char* container_path, uint64_t offset, void* buf
     to_read = entry->orig_size - offset;
   }
 
-  // For now, assume no compression (comp == 0)
-  if (entry->comp != 0) {
-    return 0; // Compression not supported yet
+  // Handle compressed files
+  if (entry->comp != BFC_COMP_NONE) {
+    if (!bfc_compress_is_supported(entry->comp)) {
+      return 0; // Unsupported compression type
+    }
+
+    // For compressed files, we need to decompress the entire file
+    // and then return the requested portion
+    return read_compressed_file(r, entry, offset, buf, to_read);
   }
 
   // Calculate file position
@@ -511,36 +595,90 @@ int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd) {
     return BFC_E_IO;
   }
 
-  // Stream content to output fd with CRC validation
-  uint8_t buffer[READ_BUFFER_SIZE];
-  uint64_t remaining = entry->orig_size;
-  bfc_crc32c_ctx_t crc_ctx;
-  bfc_crc32c_reset(&crc_ctx);
+  // Handle compressed vs uncompressed files
+  if (entry->comp != BFC_COMP_NONE) {
+    // Compressed file - decompress and write
+    if (!bfc_compress_is_supported(entry->comp)) {
+      return BFC_E_INVAL;
+    }
 
-  while (remaining > 0) {
-    size_t chunk = remaining > sizeof(buffer) ? sizeof(buffer) : (size_t) remaining;
-    size_t bytes_read = fread(buffer, 1, chunk, r->file);
-
-    if (bytes_read == 0) {
+    // Read all compressed data
+    void* compressed_data = malloc(obj_hdr.enc_size);
+    if (!compressed_data) {
       return BFC_E_IO;
     }
 
-    if (write(out_fd, buffer, bytes_read) != (ssize_t) bytes_read) {
+    size_t compressed_read = fread(compressed_data, 1, obj_hdr.enc_size, r->file);
+    if (compressed_read != obj_hdr.enc_size) {
+      free(compressed_data);
       return BFC_E_IO;
     }
 
-    bfc_crc32c_update(&crc_ctx, buffer, bytes_read);
-    remaining -= bytes_read;
+    // Decompress
+    bfc_decompress_result_t decomp_result =
+        bfc_decompress_data(entry->comp, compressed_data, obj_hdr.enc_size, obj_hdr.orig_size);
+    free(compressed_data);
 
-    if (bytes_read < chunk) {
-      break; // EOF
+    if (decomp_result.error != BFC_OK || !decomp_result.data) {
+      return BFC_E_IO;
     }
-  }
 
-  // Verify CRC
-  uint32_t calculated_crc = bfc_crc32c_final(&crc_ctx);
-  if (calculated_crc != entry->crc32c) {
-    return BFC_E_CRC;
+    // Validate decompressed size
+    if (decomp_result.decompressed_size != obj_hdr.orig_size) {
+      free(decomp_result.data);
+      return BFC_E_CRC;
+    }
+
+    // Validate CRC
+    bfc_crc32c_ctx_t crc_ctx;
+    bfc_crc32c_reset(&crc_ctx);
+    bfc_crc32c_update(&crc_ctx, decomp_result.data, decomp_result.decompressed_size);
+    uint32_t calculated_crc = bfc_crc32c_final(&crc_ctx);
+
+    if (calculated_crc != entry->crc32c) {
+      free(decomp_result.data);
+      return BFC_E_CRC;
+    }
+
+    // Write decompressed data to output
+    ssize_t written = write(out_fd, decomp_result.data, decomp_result.decompressed_size);
+    free(decomp_result.data);
+
+    if (written != (ssize_t) decomp_result.decompressed_size) {
+      return BFC_E_IO;
+    }
+  } else {
+    // Uncompressed file - stream directly
+    uint8_t buffer[READ_BUFFER_SIZE];
+    uint64_t remaining = entry->orig_size;
+    bfc_crc32c_ctx_t crc_ctx;
+    bfc_crc32c_reset(&crc_ctx);
+
+    while (remaining > 0) {
+      size_t chunk = remaining > sizeof(buffer) ? sizeof(buffer) : (size_t) remaining;
+      size_t bytes_read = fread(buffer, 1, chunk, r->file);
+
+      if (bytes_read == 0) {
+        return BFC_E_IO;
+      }
+
+      if (write(out_fd, buffer, bytes_read) != (ssize_t) bytes_read) {
+        return BFC_E_IO;
+      }
+
+      bfc_crc32c_update(&crc_ctx, buffer, bytes_read);
+      remaining -= bytes_read;
+
+      if (bytes_read < chunk) {
+        break; // EOF
+      }
+    }
+
+    // Verify CRC
+    uint32_t calculated_crc = bfc_crc32c_final(&crc_ctx);
+    if (calculated_crc != entry->crc32c) {
+      return BFC_E_CRC;
+    }
   }
 
   return BFC_OK;

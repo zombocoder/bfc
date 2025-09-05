@@ -279,8 +279,26 @@ static void show_entry_info(bfc_t* reader, const char* path) {
 
     double ratio = (entry.size > 0) ? (double) entry.obj_size / entry.size : 1.0;
 
+    // Show compression information
+    const char* comp_name;
+    switch (entry.comp) {
+    case BFC_COMP_NONE:
+      comp_name = "none";
+      break;
+    case BFC_COMP_ZSTD:
+      comp_name = "zstd";
+      break;
+    default:
+      comp_name = "unknown";
+      break;
+    }
+
+    printf("Compression: %s\n", comp_name);
     printf("Stored size: %s\n", stored_str);
     printf("Storage ratio: %.1f%%\n", ratio * 100.0);
+    if (entry.comp != BFC_COMP_NONE && entry.size > 0) {
+      printf("Compression ratio: %.1f%%\n", (1.0 - ratio) * 100.0);
+    }
     printf("CRC32C: 0x%08x\n", entry.crc32c);
     printf("Object offset: %" PRIu64 "\n", entry.obj_offset);
   }
