@@ -22,12 +22,20 @@ set(UNIT_TEST_SOURCES
     test_reader.c
     test_util.c
     test_os.c
+    test_compress.c
     test_main.c
 )
 
 add_executable(unit_tests ${UNIT_TEST_SOURCES})
 
 target_link_libraries(unit_tests bfc)
+
+# Link ZSTD if enabled (needed for static library dependencies)
+if(BFC_WITH_ZSTD)
+    target_link_libraries(unit_tests ${ZSTD_LIBRARIES})
+    target_link_directories(unit_tests PRIVATE ${ZSTD_LIBRARY_DIRS})
+    target_compile_definitions(unit_tests PRIVATE BFC_WITH_ZSTD)
+endif()
 
 target_include_directories(unit_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -42,4 +50,5 @@ add_test(NAME unit_writer COMMAND unit_tests writer)
 add_test(NAME unit_reader COMMAND unit_tests reader)
 add_test(NAME unit_util COMMAND unit_tests util)
 add_test(NAME unit_os COMMAND unit_tests os)
+add_test(NAME unit_compress COMMAND unit_tests compress)
 add_test(NAME unit_all COMMAND unit_tests)

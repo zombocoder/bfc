@@ -15,6 +15,7 @@
  */
 
 #define _GNU_SOURCE
+#include "bfc_compress.h"
 #include "bfc_crc32c.h"
 #include "bfc_format.h"
 #include "bfc_os.h"
@@ -47,6 +48,11 @@ struct bfc {
   uint32_t block_size;
   uint64_t features;
   uint8_t uuid[16];
+
+  // Compression settings
+  uint8_t compression_type;
+  int compression_level;
+  size_t compression_threshold;
 
   // Index entries
   bfc_array_t index;
@@ -150,6 +156,18 @@ int bfc_create(const char* filename, uint32_t block_size, uint64_t features, bfc
   bfc_uuid_generate(w->uuid);
   w->current_offset = BFC_HEADER_SIZE;
 
+  // Initialize compression settings
+  w->compression_type = BFC_COMP_NONE; // Default to no compression
+  w->compression_level = 3;            // Default compression level
+  w->compression_threshold = 64;       // Don't compress files smaller than 64 bytes
+
+  // If ZSTD features are enabled, use ZSTD compression by default
+  if (features & BFC_FEATURE_ZSTD) {
+    if (bfc_compress_is_supported(BFC_COMP_ZSTD)) {
+      w->compression_type = BFC_COMP_ZSTD;
+    }
+  }
+
   // Write header
   struct bfc_header hdr = {0};
   memcpy(hdr.magic, BFC_MAGIC, BFC_MAGIC_SIZE);
@@ -231,22 +249,123 @@ int bfc_add_file(bfc_t* w, const char* container_path, FILE* src, uint32_t mode,
     }
   }
 
-  // Stream content and calculate CRC
+  // First pass: read entire file to determine size and compression strategy
+  long src_pos = ftell(src);
+  if (src_pos < 0) {
+    bfc_path_free(norm_path);
+    return BFC_E_IO;
+  }
+
+  fseek(src, 0, SEEK_END);
+  long file_size = ftell(src);
+  fseek(src, src_pos, SEEK_SET);
+
+  if (file_size < 0) {
+    bfc_path_free(norm_path);
+    return BFC_E_IO;
+  }
+
+  // Decide on compression type
+  uint8_t use_compression = w->compression_type;
+  if (use_compression != BFC_COMP_NONE && (size_t) file_size < w->compression_threshold) {
+    use_compression = BFC_COMP_NONE; // File too small to compress
+  }
+
+  // Read sample for compression recommendation if using auto-detect
+  uint8_t sample_buffer[512];
+  size_t sample_size = 0;
+  if (use_compression != BFC_COMP_NONE && file_size > 0) {
+    sample_size = fread(sample_buffer, 1, sizeof(sample_buffer), src);
+    fseek(src, src_pos, SEEK_SET);
+
+    // Get recommendation and override if needed
+    uint8_t recommended = bfc_compress_recommend((size_t) file_size, sample_buffer, sample_size);
+    if (w->compression_type == BFC_COMP_NONE) {
+      use_compression = recommended;
+    }
+  }
+
+  obj_hdr.comp = use_compression;
+
+  // Stream content, compress if needed, and calculate CRC
   bfc_crc32c_ctx_t crc_ctx;
   bfc_crc32c_reset(&crc_ctx);
 
   uint8_t buffer[WRITE_BUFFER_SIZE];
   uint64_t total_bytes = 0;
+  uint64_t encoded_bytes = 0;
   size_t bytes_read;
 
-  while ((bytes_read = fread(buffer, 1, sizeof(buffer), src)) > 0) {
-    if (fwrite(buffer, 1, bytes_read, w->file) != bytes_read) {
+  if (use_compression == BFC_COMP_NONE) {
+    // No compression - direct copy
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+      if (fwrite(buffer, 1, bytes_read, w->file) != bytes_read) {
+        bfc_path_free(norm_path);
+        return BFC_E_IO;
+      }
+
+      bfc_crc32c_update(&crc_ctx, buffer, bytes_read);
+      total_bytes += bytes_read;
+      encoded_bytes += bytes_read;
+    }
+  } else {
+    // Compression enabled - read all data first, then compress
+    void* file_data = malloc((size_t) file_size);
+    if (!file_data) {
       bfc_path_free(norm_path);
       return BFC_E_IO;
     }
 
-    bfc_crc32c_update(&crc_ctx, buffer, bytes_read);
-    total_bytes += bytes_read;
+    size_t actual_read = fread(file_data, 1, (size_t) file_size, src);
+    if (actual_read != (size_t) file_size) {
+      free(file_data);
+      bfc_path_free(norm_path);
+      return BFC_E_IO;
+    }
+
+    // Calculate CRC of original data
+    bfc_crc32c_update(&crc_ctx, file_data, actual_read);
+    total_bytes = actual_read;
+
+    // Compress the data
+    bfc_compress_result_t compress_result =
+        bfc_compress_data(use_compression, file_data, actual_read, w->compression_level);
+
+    free(file_data);
+
+    if (compress_result.error != BFC_OK) {
+      bfc_path_free(norm_path);
+      return compress_result.error;
+    }
+
+    // Check if compression actually helped
+    if (compress_result.compressed_size >= actual_read) {
+      // Compression didn't help, fall back to uncompressed
+      free(compress_result.data);
+
+      // Reset file position and use no compression
+      fseek(src, src_pos, SEEK_SET);
+      obj_hdr.comp = BFC_COMP_NONE;
+
+      while ((bytes_read = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+        if (fwrite(buffer, 1, bytes_read, w->file) != bytes_read) {
+          bfc_path_free(norm_path);
+          return BFC_E_IO;
+        }
+        encoded_bytes += bytes_read;
+      }
+    } else {
+      // Compression helped, write compressed data
+      if (fwrite(compress_result.data, 1, compress_result.compressed_size, w->file) !=
+          compress_result.compressed_size) {
+        free(compress_result.data);
+        bfc_path_free(norm_path);
+        return BFC_E_IO;
+      }
+
+      encoded_bytes = compress_result.compressed_size;
+      free(compress_result.data);
+    }
   }
 
   if (ferror(src)) {
@@ -261,7 +380,7 @@ int bfc_add_file(bfc_t* w, const char* container_path, FILE* src, uint32_t mode,
 
   // Update object header with actual sizes and CRC
   obj_hdr.orig_size = total_bytes;
-  obj_hdr.enc_size = total_bytes;
+  obj_hdr.enc_size = encoded_bytes;
   obj_hdr.crc32c = crc;
 
   long current_pos = ftell(w->file);
@@ -288,7 +407,7 @@ int bfc_add_file(bfc_t* w, const char* container_path, FILE* src, uint32_t mode,
   // Add to index
   uint64_t obj_size = (uint64_t) current_pos - obj_start;
   result = add_path_to_index(w, norm_path, obj_start, obj_size, mode | S_IFREG, mtime_ns,
-                             BFC_COMP_NONE, total_bytes, crc);
+                             obj_hdr.comp, total_bytes, crc);
 
   if (result == BFC_OK) {
     w->current_offset = (uint64_t) current_pos;
@@ -501,4 +620,57 @@ void bfc_close(bfc_t* w) {
   }
 
   bfc_free(w);
+}
+
+/* --- Compression Configuration Functions --- */
+
+int bfc_set_compression(bfc_t* w, uint8_t comp_type, int level) {
+  if (!w) {
+    return BFC_E_INVAL;
+  }
+
+  if (w->finished) {
+    return BFC_E_INVAL;
+  }
+
+  if (!bfc_compress_is_supported(comp_type)) {
+    return BFC_E_INVAL;
+  }
+
+  // Validate compression level
+  if (level < 0)
+    level = 0; // Use default
+  if (comp_type == BFC_COMP_ZSTD && level > 22)
+    level = 22; // Max ZSTD level
+
+  w->compression_type = comp_type;
+  w->compression_level = level;
+
+  // Update features flag if using ZSTD
+  if (comp_type == BFC_COMP_ZSTD) {
+    w->features |= BFC_FEATURE_ZSTD;
+  }
+
+  return BFC_OK;
+}
+
+int bfc_set_compression_threshold(bfc_t* w, size_t min_bytes) {
+  if (!w) {
+    return BFC_E_INVAL;
+  }
+
+  if (w->finished) {
+    return BFC_E_INVAL;
+  }
+
+  w->compression_threshold = min_bytes;
+  return BFC_OK;
+}
+
+uint8_t bfc_get_compression(bfc_t* w) {
+  if (!w) {
+    return BFC_COMP_NONE;
+  }
+
+  return w->compression_type;
 }
