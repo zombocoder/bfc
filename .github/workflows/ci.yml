@@ -244,6 +244,12 @@ jobs:
 
   security:
     runs-on: ubuntu-latest
+    
+    # Add permissions for security scanning
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
 
     steps:
       - name: Checkout code
@@ -270,6 +276,17 @@ jobs:
   documentation:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    # Add permissions for GitHub Pages
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    
+    # Environment for GitHub Pages deployment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout code
@@ -289,12 +306,19 @@ jobs:
             sed -i 's/INPUT                  =/INPUT                  = include\/ src\/ README.md/' Doxyfile
             sed -i 's/RECURSIVE              = NO/RECURSIVE              = YES/' Doxyfile
             sed -i 's/GENERATE_HTML          = YES/GENERATE_HTML          = YES/' Doxyfile
+            sed -i 's/OUTPUT_DIRECTORY       =/OUTPUT_DIRECTORY       = docs/' Doxyfile
           fi
 
           doxygen Doxyfile
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Setup Pages
+        uses: actions/configure-pages@v3
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v2
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./html
+          path: docs/html
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
