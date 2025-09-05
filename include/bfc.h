@@ -1,0 +1,75 @@
+/*
+ * Copyright 2021 zombocoder (Taras Havryliak)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#pragma once
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define BFC_OK 0
+typedef enum {
+  BFC_E_BADMAGIC = -1,
+  BFC_E_IO = -2,
+  BFC_E_CRC = -3,
+  BFC_E_INVAL = -4,
+  BFC_E_EXISTS = -5,
+  BFC_E_NOTFOUND = -6,
+  BFC_E_PERM = -7,
+} bfc_err_t;
+
+typedef struct bfc bfc_t;
+
+typedef struct {
+  const char* path; // UTF-8
+  uint32_t mode;    // POSIX bits
+  uint64_t mtime_ns;
+  uint32_t comp; // 0
+  uint64_t size; // uncompressed
+  uint32_t crc32c;
+  uint64_t obj_offset;
+  uint64_t obj_size;
+} bfc_entry_t;
+
+/* --- Writer API (append-only) --- */
+int bfc_create(const char* filename, uint32_t block_size, uint64_t features, bfc_t** out);
+int bfc_add_file(bfc_t* w, const char* container_path, FILE* src, uint32_t mode, uint64_t mtime_ns,
+                 uint32_t* out_crc);
+int bfc_add_dir(bfc_t* w, const char* container_dir, uint32_t mode, uint64_t mtime_ns);
+int bfc_finish(bfc_t* w); // writes index + footer, fsync
+void bfc_close(bfc_t* w); // closes handle, safe to call after finish
+
+/* --- Reader API --- */
+int bfc_open(const char* filename, bfc_t** out);
+void bfc_close_read(bfc_t* r);
+
+int bfc_stat(bfc_t* r, const char* container_path, bfc_entry_t* out);
+typedef int (*bfc_list_cb)(const bfc_entry_t* ent, void* user);
+int bfc_list(bfc_t* r, const char* prefix_dir, bfc_list_cb cb, void* user);
+
+size_t bfc_read(bfc_t* r, const char* container_path, uint64_t offset, void* buf,
+                size_t len); // content only
+
+/* --- Utilities --- */
+int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd); // validates crc
+int bfc_verify(bfc_t* r, int deep); // deep: read & crc contents
+
+#ifdef __cplusplus
+}
+#endif

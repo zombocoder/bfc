@@ -1,0 +1,93 @@
+# Build directories
+build/
+cmake-build-*/
+
+# CMake files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+CTestTestfile.txt
+_deps/
+install_manifest.txt
+
+# Compiled object files
+*.o
+*.obj
+*.lo
+*.slo
+
+# Compiled libraries
+*.a
+*.la
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# Executables
+*.exe
+*.out
+bfc
+unit_tests
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+*.ilk
+*.map
+
+# Core dumps
+core
+core.*
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.DS_Store
+*.swp
+*.swo
+*.log
+
+# Test output files
+*.bfc
+/tmp/test_*.bfc
+/tmp/extracted_*
+
+# IDE files
+.vscode/
+.idea/
+*.vcxproj*
+*.sln
+*.suo
+*.user
+
+# Clang/GCC coverage files
+*.gcov
+*.gcda
+*.gcno
+
+# Valgrind files
+*.memcheck
+*.helgrind
+*.cachegrind
+*.massif
+
+# Package files
+*.tar.gz
+*.zip
+*.deb
+*.rpm
+
+# coverage reports
+cppcheck.xml
+coverage.info
+
+# codeql
+db-bfc
+*.sarif

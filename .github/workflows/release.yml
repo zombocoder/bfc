@@ -1,0 +1,301 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-release:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+            cc: clang
+            cxx: clang++
+            platform: linux
+          - os: macos-13
+            arch: x86_64
+            cc: clang
+            cxx: clang++
+            platform: macos
+          - os: macos-14
+            arch: arm64
+            cc: clang
+            cxx: clang++
+            platform: macos
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang rpm
+          # Install fpm for package creation
+          sudo gem install fpm
+
+      - name: Install dependencies (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          echo "cmake is already available on macOS runners"
+          # Install create-dmg for DMG creation
+          brew install create-dmg
+
+      - name: Build Release
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+            -DCMAKE_INSTALL_PREFIX=/usr/local
+
+          cmake --build build --config Release -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure
+
+      - name: Test CLI
+        run: |
+          # Create test data
+          mkdir -p test_data
+          echo "Release test" > test_data/test.txt
+
+          # Test basic functionality
+          ./build/bin/bfc create test.bfc test_data/
+          ./build/bin/bfc list test.bfc
+          ./build/bin/bfc verify test.bfc
+
+          # Clean up
+          rm -rf test_data test.bfc
+
+      - name: Get version
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create release package
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          PACKAGE_NAME=bfc-${VERSION#v}-${{ matrix.platform }}-${{ matrix.arch }}
+
+          # Create package directory
+          mkdir -p ${PACKAGE_NAME}
+
+          # Copy binaries and libraries
+          cp build/bin/bfc ${PACKAGE_NAME}/
+          cp build/lib/libbfc.a ${PACKAGE_NAME}/
+
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            cp build/lib/libbfc.so ${PACKAGE_NAME}/
+          else
+            cp build/lib/libbfc.dylib ${PACKAGE_NAME}/
+          fi
+
+          # Copy headers and documentation
+          cp include/bfc.h ${PACKAGE_NAME}/
+          cp README.md ${PACKAGE_NAME}/
+          cp LICENSE ${PACKAGE_NAME}/
+
+          # Create install script
+          cat > ${PACKAGE_NAME}/install.sh << 'EOF'
+          #!/bin/bash
+          set -e
+
+          PREFIX=${1:-/usr/local}
+
+          echo "Installing BFC to ${PREFIX}"
+
+          # Create directories
+          sudo mkdir -p ${PREFIX}/bin ${PREFIX}/lib ${PREFIX}/include
+
+          # Install files
+          sudo cp bfc ${PREFIX}/bin/
+          sudo cp libbfc.* ${PREFIX}/lib/
+          sudo cp bfc.h ${PREFIX}/include/
+
+          # Update library cache (Linux only)
+          if command -v ldconfig >/dev/null 2>&1; then
+            sudo ldconfig
+          fi
+
+          echo "BFC installed successfully!"
+          echo "Try: bfc --version"
+          EOF
+
+          chmod +x ${PACKAGE_NAME}/install.sh
+
+          # Create tarball
+          tar -czf ${PACKAGE_NAME}.tar.gz ${PACKAGE_NAME}
+
+      - name: Create DEB and RPM packages (Linux only)
+        if: matrix.platform == 'linux'
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          VERSION_NO_V=${VERSION#v}
+
+          # Create staging directory
+          mkdir -p staging/usr/bin
+          mkdir -p staging/usr/lib
+          mkdir -p staging/usr/include
+          mkdir -p staging/usr/share/doc/bfc
+
+          # Copy files to staging
+          cp build/bin/bfc staging/usr/bin/
+          cp build/lib/libbfc.a staging/usr/lib/
+          cp build/lib/libbfc.so staging/usr/lib/
+          cp include/bfc.h staging/usr/include/
+          cp README.md staging/usr/share/doc/bfc/
+          cp LICENSE staging/usr/share/doc/bfc/
+
+          # Create DEB package
+          fpm -s dir -t deb -n bfc -v ${VERSION_NO_V} \
+            --description "Binary File Container - High-performance single-file container format" \
+            --url "https://github.com/zombocoder/bfc" \
+            --maintainer "zombocoder <zombocoder@users.noreply.github.com>" \
+            --license "Apache-2.0" \
+            --architecture ${{ matrix.arch }} \
+            --depends libc6 \
+            -C staging \
+            usr/bin usr/lib usr/include usr/share
+
+          # Create RPM package
+          fpm -s dir -t rpm -n bfc -v ${VERSION_NO_V} \
+            --description "Binary File Container - High-performance single-file container format" \
+            --url "https://github.com/zombocoder/bfc" \
+            --maintainer "zombocoder <zombocoder@users.noreply.github.com>" \
+            --license "Apache-2.0" \
+            --architecture ${{ matrix.arch }} \
+            --depends glibc \
+            -C staging \
+            usr/bin usr/lib usr/include usr/share
+
+      - name: Create macOS DMG package (macOS only)
+        if: matrix.platform == 'macos'
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          VERSION_NO_V=${VERSION#v}
+          DMG_NAME=bfc-${VERSION_NO_V}-${{ matrix.platform }}-${{ matrix.arch }}
+          
+          # Create app bundle structure
+          mkdir -p BFC.app/Contents/{MacOS,Resources,Frameworks}
+          
+          # Create Info.plist
+          cat > BFC.app/Contents/Info.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>bfc</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.zombocoder.bfc</string>
+              <key>CFBundleName</key>
+              <string>BFC</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION_NO_V}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION_NO_V}</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>10.15</string>
+          </dict>
+          </plist>
+          EOF
+          
+          # Copy binaries and libraries
+          cp build/bin/bfc BFC.app/Contents/MacOS/
+          cp build/lib/libbfc.a BFC.app/Contents/Frameworks/
+          cp build/lib/libbfc.dylib BFC.app/Contents/Frameworks/
+          
+          # Create CLI installer package directory
+          mkdir -p bfc-cli/usr/local/{bin,lib,include}
+          cp build/bin/bfc bfc-cli/usr/local/bin/
+          cp build/lib/libbfc.* bfc-cli/usr/local/lib/
+          cp include/bfc.h bfc-cli/usr/local/include/
+          
+          # Create installer script
+          cat > bfc-cli/install.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          echo "Installing BFC CLI tools..."
+          
+          # Copy files
+          sudo cp usr/local/bin/bfc /usr/local/bin/
+          sudo cp usr/local/lib/libbfc.* /usr/local/lib/
+          sudo cp usr/local/include/bfc.h /usr/local/include/
+          
+          # Update library cache
+          sudo update_dyld_shared_cache || true
+          
+          echo "BFC installed successfully!"
+          echo "Try: bfc --version"
+          EOF
+          
+          chmod +x bfc-cli/install.sh
+          
+          # Create DMG with both app bundle and CLI tools
+          mkdir -p dmg-contents
+          cp -r BFC.app dmg-contents/
+          cp -r bfc-cli dmg-contents/"BFC CLI Tools"
+          cp README.md dmg-contents/
+          cp LICENSE dmg-contents/
+          
+          # Create symlink to Applications
+          ln -s /Applications dmg-contents/Applications
+          
+          # Create DMG
+          create-dmg \
+            --volname "BFC ${VERSION_NO_V}" \
+            --volicon dmg-contents/BFC.app/Contents/Resources/icon.icns \
+            --window-pos 200 120 \
+            --window-size 800 600 \
+            --icon-size 100 \
+            --icon "BFC.app" 200 190 \
+            --icon "Applications" 600 190 \
+            --icon "BFC CLI Tools" 200 350 \
+            --hide-extension "BFC.app" \
+            --app-drop-link 600 185 \
+            --no-internet-enable \
+            "${DMG_NAME}.dmg" \
+            dmg-contents/ || \
+          # Fallback if create-dmg fails
+          hdiutil create -volname "BFC ${VERSION_NO_V}" -srcfolder dmg-contents -ov -format UDZO "${DMG_NAME}.dmg"
+
+      - name: Upload Release Assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.get_version.outputs.version }}
+        run: |
+          echo "Current directory contents:"
+          ls -la
+          
+          echo "Looking for package files..."
+          find . -name "*.tar.gz" -o -name "*.deb" -o -name "*.rpm" -o -name "*.dmg" | head -20
+          
+          # Upload all package files to the existing release
+          for file in *.tar.gz *.deb *.rpm *.dmg; do
+            if [ -f "$file" ]; then
+              echo "Uploading $file to release ${VERSION}"
+              gh release upload "${VERSION}" "$file" --clobber
+            fi
+          done
+          
+          # Also try to upload from current directory using find results
+          find . -maxdepth 1 \( -name "*.tar.gz" -o -name "*.deb" -o -name "*.rpm" -o -name "*.dmg" \) -exec bash -c '
+            for file; do
+              echo "Found and uploading: $file"
+              gh release upload "${{ steps.get_version.outputs.version }}" "$file" --clobber
+            done
+          ' _ {} +

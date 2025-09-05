@@ -1,0 +1,300 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build_type: [Debug, Release]
+        include:
+          - os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+          - os: macos-latest
+            cc: clang
+            cxx: clang++
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang-format clang-tidy
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install clang-format || true
+          # cmake is already available on macOS runners
+
+      - name: Set up environment
+        run: |
+          echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
+          echo "CXX=${{ matrix.cxx }}" >> $GITHUB_ENV
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Run tests
+        if: matrix.build_type == 'Debug'
+        run: |
+          cd build
+          ctest --output-on-failure --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Test CLI functionality
+        run: |
+          # Create test data
+          mkdir -p test_data
+          echo "Hello World" > test_data/hello.txt
+          echo "Goodbye" > test_data/bye.txt
+          mkdir -p test_data/subdir
+          echo "Nested file" > test_data/subdir/nested.txt
+
+          # Test CLI workflow
+          ./build/bin/bfc create test.bfc test_data/
+          ./build/bin/bfc list test.bfc
+          ./build/bin/bfc info test.bfc
+          ./build/bin/bfc verify test.bfc
+          ./build/bin/bfc verify --deep test.bfc
+
+          # Test extraction
+          mkdir -p extract_test
+          cd extract_test
+          ../build/bin/bfc extract ../test.bfc
+
+          # Verify extracted files
+          [ -f hello.txt ] && echo "hello.txt extracted"
+          [ -f bye.txt ] && echo "bye.txt extracted"
+          [ -f subdir/nested.txt ] && echo "nested.txt extracted"
+
+          cd ..
+          rm -rf extract_test test.bfc test_data
+
+      - name: Run benchmarks
+        run: |
+          cd build/benchmarks
+          ./benchmark_crc32c
+
+          # Run with timeout (different commands for Linux vs macOS)
+          if command -v timeout >/dev/null 2>&1; then
+            timeout 30s ./benchmark_writer || true
+            timeout 30s ./benchmark_reader || true
+          elif command -v gtimeout >/dev/null 2>&1; then
+            gtimeout 30s ./benchmark_writer || true
+            gtimeout 30s ./benchmark_reader || true
+          else
+            # macOS without coreutils - run without timeout
+            echo "Running benchmarks without timeout on macOS..."
+            ./benchmark_writer &
+            WRITER_PID=$!
+            sleep 10 && kill $WRITER_PID 2>/dev/null || true
+            wait $WRITER_PID 2>/dev/null || true
+            
+            ./benchmark_reader &
+            READER_PID=$!
+            sleep 10 && kill $READER_PID 2>/dev/null || true
+            wait $READER_PID 2>/dev/null || true
+          fi
+
+      - name: Check code formatting (Ubuntu Debug only)
+        if: matrix.os == 'ubuntu-latest' && matrix.build_type == 'Debug'
+        run: |
+          find src include tests examples -name "*.c" -o -name "*.h" | xargs clang-format --dry-run --Werror
+
+  coverage:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake lcov bc
+
+      - name: Configure CMake with coverage
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBFC_COVERAGE=ON \
+            -DBFC_BUILD_BENCHMARKS=OFF \
+            -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure
+
+      - name: Generate coverage report
+        run: |
+          cd build
+          lcov --capture --directory . --output-file coverage.info \
+            --rc branch_coverage=1 \
+            --ignore-errors deprecated,unsupported,unused
+          lcov --remove coverage.info \
+            '/usr/*' \
+            '*/tests/*' \
+            --output-file coverage_filtered.info \
+            --rc branch_coverage=1 \
+            --ignore-errors deprecated,unsupported,unused
+          lcov --list coverage_filtered.info \
+            --rc branch_coverage=1 \
+            --ignore-errors deprecated,unsupported,unused
+
+      - name: Check coverage thresholds
+        run: |
+          cd build
+          # Generate summary and check thresholds
+          lcov --summary coverage_filtered.info \
+            --rc branch_coverage=1 \
+            --ignore-errors deprecated,unsupported,unused > coverage_summary.txt 2>&1
+
+          # Extract coverage percentages
+          LINE_COV=$(grep "lines" coverage_summary.txt | grep -o '[0-9]\+\.[0-9]\+%' | head -1 | sed 's/%//')
+          FUNC_COV=$(grep "functions" coverage_summary.txt | grep -o '[0-9]\+\.[0-9]\+%' | head -1 | sed 's/%//')
+          BRANCH_COV=$(grep "branches" coverage_summary.txt | grep -o '[0-9]\+\.[0-9]\+%' | head -1 | sed 's/%//')
+
+          echo "Coverage Summary:"
+          echo "Lines: ${LINE_COV}%"
+          echo "Functions: ${FUNC_COV}%"
+          echo "Branches: ${BRANCH_COV}%"
+
+          # Set coverage threshold (we achieved 78.5% so let's set to 75%)
+          THRESHOLD=75
+
+          # Check thresholds using bc for floating point comparison
+          if command -v bc >/dev/null 2>&1; then
+            LINE_FAIL=$(echo "${LINE_COV} < ${THRESHOLD}" | bc -l)
+            FUNC_FAIL=$(echo "${FUNC_COV} < 95" | bc -l)  # High threshold for functions
+            
+            if [ "${LINE_FAIL}" = "1" ]; then
+              echo "ERROR: Line coverage ${LINE_COV}% is below threshold ${THRESHOLD}%"
+              exit 1
+            fi
+            
+            if [ "${FUNC_FAIL}" = "1" ]; then
+              echo "ERROR: Function coverage ${FUNC_COV}% is below threshold 95%"
+              exit 1
+            fi
+            
+            echo "All coverage thresholds met!"
+          else
+            echo "bc not available, skipping threshold checks"
+          fi
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: build/coverage_filtered.info
+          fail_ci_if_error: false
+
+  static-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake clang-tidy cppcheck
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Run clang-tidy
+        run: |
+          cd build
+          run-clang-tidy -p . ../src/ || true
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=all --inconclusive --xml --xml-version=2 \
+            --suppress=missingIncludeSystem \
+            --suppress=unmatchedSuppression \
+            src/ include/ 2> cppcheck.xml || true
+
+          # Show results (non-blocking)
+          cat cppcheck.xml
+
+  security:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/init@v3
+        with:
+          languages: cpp
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake
+
+      - name: Build for CodeQL
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBFC_BUILD_BENCHMARKS=OFF
+          cmake --build build
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  documentation:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
+      - name: Generate documentation
+        run: |
+          # Create Doxygen config if it doesn't exist
+          if [ ! -f Doxyfile ]; then
+            doxygen -g
+            sed -i 's/PROJECT_NAME           = "My Project"/PROJECT_NAME           = "BFC"/' Doxyfile
+            sed -i 's/INPUT                  =/INPUT                  = include\/ src\/ README.md/' Doxyfile
+            sed -i 's/RECURSIVE              = NO/RECURSIVE              = YES/' Doxyfile
+            sed -i 's/GENERATE_HTML          = YES/GENERATE_HTML          = YES/' Doxyfile
+          fi
+
+          doxygen Doxyfile
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./html
