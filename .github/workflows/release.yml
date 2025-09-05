@@ -7,6 +7,10 @@ on:
 
 jobs:
   build-release:
+    # Add permissions for release asset uploads
+    permissions:
+      contents: write
+      
     strategy:
       matrix:
         include:
