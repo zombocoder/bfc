@@ -15,6 +15,7 @@
  */
 
 #include "bfc_encrypt.h"
+#include "bfc_os.h"
 #include <assert.h>
 #include <bfc.h>
 #include <fcntl.h>
@@ -567,6 +568,172 @@ static int test_encrypt_utility_coverage(void) {
   return 0;
 }
 
+// Test bfc_has_encryption function for different container states
+static int test_has_encryption_detection(void) {
+#ifdef BFC_WITH_SODIUM
+  char unencrypted_container[256];
+  char encrypted_container[256];
+  char test_file[256];
+  int pid = getpid();
+  snprintf(unencrypted_container, sizeof(unencrypted_container), "/tmp/test_unenc_%d.bfc", pid);
+  snprintf(encrypted_container, sizeof(encrypted_container), "/tmp/test_enc_%d.bfc", pid);
+  snprintf(test_file, sizeof(test_file), "/tmp/test_file_%d.txt", pid);
+
+  // Create test file
+  FILE* f = fopen(test_file, "w");
+  assert(f);
+  fprintf(f, "Test content for encryption detection");
+  fclose(f);
+
+  // Test 1: Create unencrypted container and verify bfc_has_encryption returns 0
+  bfc_t* writer = NULL;
+  int result = bfc_create(unencrypted_container, 4096, 0, &writer);
+  assert(result == BFC_OK);
+  
+  FILE* src = fopen(test_file, "r");
+  assert(src);
+  result = bfc_add_file(writer, "test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
+  assert(result == BFC_OK);
+  fclose(src);
+  
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+  bfc_close(writer);
+
+  // Open unencrypted container and check encryption detection
+  bfc_t* reader = NULL;
+  result = bfc_open(unencrypted_container, &reader);
+  if (result != BFC_OK) {
+    printf("Failed to open unencrypted container: %d\n", result);
+    return 1;
+  }
+  
+  assert(bfc_has_encryption(reader) == 0); // Should return 0 for unencrypted
+  bfc_close_read(reader);
+
+  // Test 2: Create encrypted container and verify bfc_has_encryption returns 1
+  writer = NULL;
+  result = bfc_create(encrypted_container, 4096, 0, &writer);
+  assert(result == BFC_OK);
+  
+  const char* password = "test_password";
+  result = bfc_set_encryption_password(writer, password, strlen(password));
+  assert(result == BFC_OK);
+  
+  src = fopen(test_file, "r");
+  assert(src);
+  result = bfc_add_file(writer, "test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
+  assert(result == BFC_OK);
+  fclose(src);
+  
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+  bfc_close(writer);
+
+  // Open encrypted container and check encryption detection
+  reader = NULL;
+  result = bfc_open(encrypted_container, &reader);
+  assert(result == BFC_OK);
+  
+  assert(bfc_has_encryption(reader) == 1); // Should return 1 for encrypted
+  bfc_close_read(reader);
+
+  // Test 3: Test with NULL reader (edge case)
+  assert(bfc_has_encryption(NULL) == 0);
+
+  // Clean up
+  unlink(unencrypted_container);
+  unlink(encrypted_container);
+  unlink(test_file);
+#endif
+
+  return 0;
+}
+
+// Test encryption error paths and edge cases
+static int test_encryption_error_paths(void) {
+#ifdef BFC_WITH_SODIUM
+  char container_filename[256];
+  char test_filename[256];
+  int pid = getpid();
+  snprintf(container_filename, sizeof(container_filename), "/tmp/test_err_%d.bfc", pid);
+  snprintf(test_filename, sizeof(test_filename), "/tmp/test_err_file_%d.txt", pid);
+
+  // Create test file
+  FILE* f = fopen(test_filename, "w");
+  assert(f);
+  fprintf(f, "Error test content");
+  fclose(f);
+
+  // Test setting encryption key on reader with valid key
+  bfc_t* writer = NULL;
+  int result = bfc_create(container_filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  uint8_t test_key[32];
+  memset(test_key, 0x42, sizeof(test_key));
+  result = bfc_set_encryption_key(writer, test_key);
+  assert(result == BFC_OK);
+
+  FILE* src = fopen(test_filename, "r");
+  assert(src);
+  result = bfc_add_file(writer, "test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
+  assert(result == BFC_OK);
+  fclose(src);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+  bfc_close(writer);
+
+  // Test reader encryption key setting
+  bfc_t* reader = NULL;
+  result = bfc_open(container_filename, &reader);
+  assert(result == BFC_OK);
+
+  result = bfc_reader_set_encryption_key(reader, test_key);
+  assert(result == BFC_OK);
+
+  // Test that we can detect encryption
+  assert(bfc_has_encryption(reader) == 1);
+
+  // Test extraction with correct key
+  int fd = open("/tmp/test_extract.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  assert(fd >= 0);
+  result = bfc_extract_to_fd(reader, "test.txt", fd);
+  assert(result == BFC_OK);
+  close(fd);
+  unlink("/tmp/test_extract.txt");
+
+  bfc_close_read(reader);
+
+  // Test with wrong key
+  reader = NULL;
+  result = bfc_open(container_filename, &reader);
+  assert(result == BFC_OK);
+
+  uint8_t wrong_key[32];
+  memset(wrong_key, 0x99, sizeof(wrong_key));
+  result = bfc_reader_set_encryption_key(reader, wrong_key);
+  assert(result == BFC_OK);
+
+  // Try to extract with wrong key - should fail
+  fd = open("/tmp/test_extract_fail.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  assert(fd >= 0);
+  result = bfc_extract_to_fd(reader, "test.txt", fd);
+  assert(result != BFC_OK); // Should fail with wrong key
+  close(fd);
+  unlink("/tmp/test_extract_fail.txt");
+
+  bfc_close_read(reader);
+
+  // Clean up
+  unlink(container_filename);
+  unlink(test_filename);
+#endif
+
+  return 0;
+}
+
 int test_encrypt(void) {
   int result = 0;
 
@@ -580,6 +747,8 @@ int test_encrypt(void) {
   result += test_end_to_end_encryption();
   result += test_encryption_with_compression();
   result += test_encrypt_utility_coverage();
+  result += test_has_encryption_detection();
+  result += test_encryption_error_paths();
 
   return result;
 }
