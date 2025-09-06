@@ -26,6 +26,26 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef BFC_WITH_SODIUM
+static int read_key_from_file(const char* filename, uint8_t key[32]) {
+  int fd = open(filename, O_RDONLY);
+  if (fd < 0) {
+    print_error("Cannot open key file '%s': %s", filename, strerror(errno));
+    return -1;
+  }
+
+  ssize_t bytes_read = read(fd, key, 32);
+  close(fd);
+
+  if (bytes_read != 32) {
+    print_error("Key file '%s' must be exactly 32 bytes, got %zd bytes", filename, bytes_read);
+    return -1;
+  }
+
+  return 0;
+}
+#endif
+
 typedef struct {
   int force;
   int preserve_paths;
@@ -33,6 +53,8 @@ typedef struct {
   const char* container_file;
   const char** extract_paths;
   int num_paths;
+  const char* encryption_password;
+  const char* encryption_keyfile;
 } extract_options_t;
 
 static void print_extract_help(void) {
@@ -42,6 +64,8 @@ static void print_extract_help(void) {
   printf("  -C, --directory DIR    Change to directory DIR before extracting\n");
   printf("  -f, --force            Overwrite existing files\n");
   printf("  -k, --keep-paths       Preserve full directory paths when extracting\n");
+  printf("  -p, --password PASS    Password for encrypted container\n");
+  printf("  -K, --keyfile FILE     Key file for encrypted container (32 bytes)\n");
   printf("  -h, --help             Show this help message\n\n");
   printf("Arguments:\n");
   printf("  container.bfc          BFC container to extract from\n");
@@ -51,6 +75,8 @@ static void print_extract_help(void) {
   printf("  bfc extract -C /tmp archive.bfc           # Extract to /tmp\n");
   printf("  bfc extract archive.bfc docs/             # Extract docs/ directory\n");
   printf("  bfc extract -k archive.bfc file.txt       # Extract preserving path\n");
+  printf("  bfc extract -p secret archive.bfc         # Extract encrypted container\n");
+  printf("  bfc extract -K key.bin archive.bfc        # Extract with key file\n");
 }
 
 static int parse_extract_options(int argc, char* argv[], extract_options_t* opts) {
@@ -61,6 +87,8 @@ static int parse_extract_options(int argc, char* argv[], extract_options_t* opts
   opts->container_file = NULL;
   opts->extract_paths = NULL;
   opts->num_paths = 0;
+  opts->encryption_password = NULL;
+  opts->encryption_keyfile = NULL;
 
   int i;
   for (i = 1; i < argc; i++) {
@@ -77,6 +105,18 @@ static int parse_extract_options(int argc, char* argv[], extract_options_t* opts
         return -1;
       }
       opts->output_dir = argv[++i];
+    } else if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--password") == 0) {
+      if (i + 1 >= argc) {
+        print_error("--password requires an argument");
+        return -1;
+      }
+      opts->encryption_password = argv[++i];
+    } else if (strcmp(argv[i], "-K") == 0 || strcmp(argv[i], "--keyfile") == 0) {
+      if (i + 1 >= argc) {
+        print_error("--keyfile requires an argument");
+        return -1;
+      }
+      opts->encryption_keyfile = argv[++i];
     } else if (argv[i][0] == '-') {
       // Handle combined short options like -fk
       const char* opt = argv[i] + 1;
@@ -360,6 +400,41 @@ int cmd_extract(int argc, char* argv[]) {
     print_error("Failed to open container '%s': %s", opts.container_file, bfc_error_string(result));
     return 1;
   }
+
+  // Configure encryption if needed
+#ifdef BFC_WITH_SODIUM
+  if (opts.encryption_password) {
+    result = bfc_reader_set_encryption_password(reader, opts.encryption_password,
+                                                strlen(opts.encryption_password));
+    if (result != BFC_OK) {
+      print_error("Failed to set encryption password: %s", bfc_error_string(result));
+      bfc_close_read(reader);
+      return 1;
+    }
+  } else if (opts.encryption_keyfile) {
+    uint8_t key[32];
+    if (read_key_from_file(opts.encryption_keyfile, key) != 0) {
+      bfc_close_read(reader);
+      return 1;
+    }
+
+    result = bfc_reader_set_encryption_key(reader, key);
+    if (result != BFC_OK) {
+      print_error("Failed to set encryption key: %s", bfc_error_string(result));
+      bfc_close_read(reader);
+      return 1;
+    }
+
+    // Clear key from memory
+    memset(key, 0, sizeof(key));
+  }
+#else
+  if (opts.encryption_password || opts.encryption_keyfile) {
+    print_error("Encryption support not available. Please build with BFC_WITH_SODIUM=ON");
+    bfc_close_read(reader);
+    return 1;
+  }
+#endif
 
   // Extract entries
   extract_context_t ctx = {&opts, reader, NULL, 0, 0};

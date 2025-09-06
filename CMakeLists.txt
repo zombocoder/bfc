@@ -21,7 +21,8 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 # Build options
 option(BFC_WITH_FUSE "Build with FUSE support for mounting" OFF)
-option(BFC_WITH_ZSTD "Build with Zstd compression support (reserved for v2)" OFF)
+option(BFC_WITH_ZSTD "Build with Zstd compression support" OFF)
+option(BFC_WITH_SODIUM "Build with libsodium encryption support" OFF)
 option(BFC_COVERAGE "Enable coverage reporting" OFF)
 option(BFC_BUILD_BENCHMARKS "Build benchmarks" ON)
 option(BFC_BUILD_EXAMPLES "Build examples" ON)
@@ -55,6 +56,12 @@ if(BFC_WITH_ZSTD)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(ZSTD REQUIRED libzstd)
     message(STATUS "ZSTD compression support enabled")
+endif()
+
+if(BFC_WITH_SODIUM)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SODIUM REQUIRED libsodium)
+    message(STATUS "libsodium encryption support enabled")
 endif()
 
 # Include directories
