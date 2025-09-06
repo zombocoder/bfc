@@ -140,9 +140,10 @@ jobs:
           rm -rf extract_keyfile
 
           # Test encryption with compression
+          echo "This is a larger test file with enough content to be compressed by zstd compression algorithm." > test_data/large.txt
           ./build/bin/bfc create -e testpass -c zstd test_enc_comp.bfc test_data/
-          ./build/bin/bfc info test_enc_comp.bfc test_data/hello.txt | grep -i encrypt
-          ./build/bin/bfc info test_enc_comp.bfc test_data/hello.txt | grep -i zstd
+          ./build/bin/bfc info test_enc_comp.bfc test_data/large.txt | grep -i encrypt
+          ./build/bin/bfc info test_enc_comp.bfc test_data/large.txt | grep -i zstd
 
           # Clean up
           rm -rf test.bfc test_data test_compressed.bfc test_fast.bfc test_balanced.bfc
