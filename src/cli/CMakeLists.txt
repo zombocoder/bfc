@@ -32,6 +32,13 @@ if(BFC_WITH_ZSTD)
     target_link_directories(bfc_cli PRIVATE ${ZSTD_LIBRARY_DIRS})
 endif()
 
+# Link libsodium if enabled (needed for encryption support)
+if(BFC_WITH_SODIUM)
+    target_link_libraries(bfc_cli ${SODIUM_LIBRARIES})
+    target_link_directories(bfc_cli PRIVATE ${SODIUM_LIBRARY_DIRS})
+    target_compile_definitions(bfc_cli PRIVATE BFC_WITH_SODIUM)
+endif()
+
 target_include_directories(bfc_cli PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src/lib

@@ -23,7 +23,7 @@
 #include <unistd.h>
 
 static int test_create_empty_container(void) {
-  const char* filename = "/tmp/test_empty.bfc";
+  const char* filename = "/tmp/writer_test_empty.bfc";
 
   // Clean up any existing file
   unlink(filename);
@@ -141,7 +141,7 @@ static int test_duplicate_paths(void) {
 }
 
 static int test_invalid_paths(void) {
-  const char* filename = "/tmp/test_invalid.bfc";
+  const char* filename = "/tmp/writer_test_invalid.bfc";
 
   unlink(filename);
 
@@ -220,20 +220,20 @@ static int test_error_conditions(void) {
   int result = bfc_create(NULL, 4096, 0, &writer);
   assert(result == BFC_E_INVAL);
 
-  result = bfc_create("/tmp/test.bfc", 4096, 0, NULL);
+  result = bfc_create("/tmp/writer_test.bfc", 4096, 0, NULL);
   assert(result == BFC_E_INVAL);
 
   // Test block size of 0 (should default to header size)
-  result = bfc_create("/tmp/test.bfc", 0, 0, &writer);
+  result = bfc_create("/tmp/writer_test.bfc", 0, 0, &writer);
   assert(result == BFC_OK);
   bfc_close(writer);
-  unlink("/tmp/test.bfc");
+  unlink("/tmp/writer_test.bfc");
 
   // Note: Small block size may be accepted and rounded up
-  result = bfc_create("/tmp/test.bfc", 100, 0, &writer);
+  result = bfc_create("/tmp/writer_test.bfc", 100, 0, &writer);
   if (result == BFC_OK) {
     bfc_close(writer);
-    unlink("/tmp/test.bfc");
+    unlink("/tmp/writer_test.bfc");
   } else {
     assert(result == BFC_E_INVAL);
   }

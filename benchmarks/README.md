@@ -92,7 +92,34 @@ Tests compression and decompression performance with ZSTD:
 - **Write performance**: 90-450 MB/s depending on compression level and file size
 - **Decompression speed**: 500-600 MB/s (often faster than compression)
 
-### 5. All Benchmarks Runner (`benchmark_all`)
+### 5. Encryption Benchmark (`benchmark_encrypt`) 
+Tests encryption and decryption performance with ChaCha20-Poly1305 AEAD (requires libsodium):
+
+**Encryption Performance Test:**
+- Tests encryption/decryption throughput with different data sizes (1KB to 4MB)
+- Benchmarks key derivation time with Argon2id
+- Tests different content types (text, binary, sparse)
+- Measures authentication failure detection
+
+**Encrypted Container Creation Test:**
+- Compares performance of different scenarios:
+  - No encryption/compression
+  - Encryption only
+  - Compression only (if ZSTD available)
+  - Combined encryption + compression
+- Measures container creation and reading performance
+- Evaluates storage overhead and compression ratios
+
+**Typical Results:**
+- **Encryption speed**: 200-800 MB/s depending on data size and type
+- **Decryption speed**: Similar to encryption, often slightly faster
+- **Key derivation**: 100-500ms (intentionally slow for security)
+- **Storage overhead**: ~28 bytes per file (nonce + authentication tag)
+- **Authentication**: 100% failure detection for tampered/wrong key data
+
+**Note:** This benchmark is only available when BFC is built with libsodium support (`-DBFC_WITH_SODIUM=ON`).
+
+### 6. All Benchmarks Runner (`benchmark_all`)
 Runs all benchmarks in sequence with system information reporting.
 
 ## Building and Running
@@ -105,6 +132,14 @@ cmake --build build
 
 # With ZSTD compression support for compression benchmarks
 cmake -S . -B build -DBFC_BUILD_BENCHMARKS=ON -DBFC_WITH_ZSTD=ON
+cmake --build build
+
+# With encryption support for encryption benchmarks (requires libsodium)
+cmake -S . -B build -DBFC_BUILD_BENCHMARKS=ON -DBFC_WITH_SODIUM=ON
+cmake --build build
+
+# With all optional features
+cmake -S . -B build -DBFC_BUILD_BENCHMARKS=ON -DBFC_WITH_ZSTD=ON -DBFC_WITH_SODIUM=ON
 cmake --build build
 ```
 
@@ -122,6 +157,9 @@ cmake --build build
 # Compression benchmark (requires ZSTD support)
 ./build/benchmarks/benchmark_compress
 
+# Encryption benchmark (requires libsodium support)
+./build/benchmarks/benchmark_encrypt
+
 # All benchmarks
 ./build/benchmarks/benchmark_all
 ```
@@ -133,6 +171,7 @@ make bench-writer
 make bench-reader
 make bench-crc32c
 make bench-compress
+make bench-encrypt  # (requires libsodium support)
 
 # All benchmarks
 make benchmarks

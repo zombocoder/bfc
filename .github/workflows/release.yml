@@ -40,7 +40,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake clang rpm libzstd-dev
+          sudo apt-get install -y build-essential cmake clang rpm libzstd-dev libsodium-dev
           # Install fpm for package creation
           sudo gem install fpm
 
@@ -48,8 +48,8 @@ jobs:
         if: matrix.platform == 'macos'
         run: |
           echo "cmake is already available on macOS runners"
-          # Install create-dmg for DMG creation and zstd for compression
-          brew install create-dmg zstd
+          # Install create-dmg for DMG creation, zstd for compression, and libsodium for encryption
+          brew install create-dmg zstd libsodium
 
       - name: Build Release
         env:
@@ -61,7 +61,8 @@ jobs:
             -DCMAKE_C_COMPILER=${{ matrix.cc }} \
             -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
             -DCMAKE_INSTALL_PREFIX=/usr/local \
-            -DBFC_WITH_ZSTD=ON
+            -DBFC_WITH_ZSTD=ON \
+            -DBFC_WITH_SODIUM=ON
 
           cmake --build build --config Release -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
@@ -75,14 +76,30 @@ jobs:
           # Create test data
           mkdir -p test_data
           echo "Release test" > test_data/test.txt
+          echo "Sensitive data for encryption test" > test_data/secret.txt
 
           # Test basic functionality
           ./build/bin/bfc create test.bfc test_data/
           ./build/bin/bfc list test.bfc
           ./build/bin/bfc verify test.bfc
 
+          # Test encryption functionality (password-based)
+          ./build/bin/bfc create -e testpass encrypted.bfc test_data/
+          ./build/bin/bfc list encrypted.bfc
+          ./build/bin/bfc verify encrypted.bfc
+          
+          # Test extraction with password
+          mkdir -p extracted
+          ./build/bin/bfc extract -p testpass -C extracted encrypted.bfc
+          diff test_data/test.txt extracted/test.txt
+          diff test_data/secret.txt extracted/secret.txt
+
+          # Test encryption with compression
+          ./build/bin/bfc create -e testpass -c zstd compressed_encrypted.bfc test_data/
+          ./build/bin/bfc verify compressed_encrypted.bfc
+
           # Clean up
-          rm -rf test_data test.bfc
+          rm -rf test_data test.bfc encrypted.bfc compressed_encrypted.bfc extracted
 
       - name: Get version
         id: get_version
@@ -164,23 +181,27 @@ jobs:
 
           # Create DEB package
           fpm -s dir -t deb -n bfc -v ${VERSION_NO_V} \
-            --description "Binary File Container - High-performance single-file container format" \
+            --description "Binary File Container - High-performance single-file container format with encryption and compression support" \
             --url "https://github.com/zombocoder/bfc" \
             --maintainer "zombocoder <zombocoder@users.noreply.github.com>" \
             --license "Apache-2.0" \
             --architecture ${{ matrix.arch }} \
             --depends libc6 \
+            --depends libzstd1 \
+            --depends libsodium23 \
             -C staging \
             usr/bin usr/lib usr/include usr/share
 
           # Create RPM package
           fpm -s dir -t rpm -n bfc -v ${VERSION_NO_V} \
-            --description "Binary File Container - High-performance single-file container format" \
+            --description "Binary File Container - High-performance single-file container format with encryption and compression support" \
             --url "https://github.com/zombocoder/bfc" \
             --maintainer "zombocoder <zombocoder@users.noreply.github.com>" \
             --license "Apache-2.0" \
             --architecture ${{ matrix.arch }} \
             --depends glibc \
+            --depends libzstd \
+            --depends libsodium \
             -C staging \
             usr/bin usr/lib usr/include usr/share
 

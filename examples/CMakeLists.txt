@@ -29,23 +29,52 @@ add_executable(extract_example extract_example.c)
 target_link_libraries(extract_example bfc)
 target_include_directories(extract_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
-# Link ZSTD if enabled (needed for static library dependencies)
+# Encrypt example - demonstrates encryption/decryption (requires libsodium)
+if(BFC_WITH_SODIUM)
+    add_executable(encrypt_example encrypt_example.c)
+    target_link_libraries(encrypt_example bfc)
+    target_include_directories(encrypt_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+endif()
+
+# Configure optional dependencies for all examples
+set(all_example_targets create_example read_example extract_example)
+if(BFC_WITH_SODIUM)
+    list(APPEND all_example_targets encrypt_example)
+endif()
+
+# Link ZSTD if enabled (avoid duplicates by handling all targets together)
 if(BFC_WITH_ZSTD)
-    foreach(target create_example read_example extract_example)
+    foreach(target ${all_example_targets})
         target_link_libraries(${target} ${ZSTD_LIBRARIES})
         target_link_directories(${target} PRIVATE ${ZSTD_LIBRARY_DIRS})
+        target_compile_definitions(${target} PRIVATE BFC_WITH_ZSTD)
+    endforeach()
+endif()
+
+# Link libsodium if enabled (avoid duplicates by handling all targets together)
+if(BFC_WITH_SODIUM)
+    foreach(target ${all_example_targets})
+        target_link_libraries(${target} ${SODIUM_LIBRARIES})
+        target_link_directories(${target} PRIVATE ${SODIUM_LIBRARY_DIRS})
+        target_compile_definitions(${target} PRIVATE BFC_WITH_SODIUM)
     endforeach()
 endif()
 
 # Install examples
-install(TARGETS create_example read_example extract_example
+set(example_targets create_example read_example extract_example)
+if(BFC_WITH_SODIUM)
+    list(APPEND example_targets encrypt_example)
+endif()
+install(TARGETS ${example_targets}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/examples)
 
 # Install example source code
+set(example_sources create_example.c read_example.c extract_example.c)
+if(BFC_WITH_SODIUM)
+    list(APPEND example_sources encrypt_example.c)
+endif()
 install(FILES 
-        create_example.c
-        read_example.c 
-        extract_example.c
+        ${example_sources}
         CMakeLists.txt
         README.md
         DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples)

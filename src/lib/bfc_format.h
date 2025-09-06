@@ -34,11 +34,15 @@
 
 // Compression types
 #define BFC_COMP_NONE 0
-#define BFC_COMP_ZSTD 1 // reserved
+#define BFC_COMP_ZSTD 1
+
+// Encryption types
+#define BFC_ENC_NONE 0
+#define BFC_ENC_CHACHA20_POLY1305 1
 
 // Feature flags
-#define BFC_FEATURE_ZSTD (1ULL << 0) // reserved
-#define BFC_FEATURE_AEAD (1ULL << 1) // reserved
+#define BFC_FEATURE_ZSTD (1ULL << 0)
+#define BFC_FEATURE_AEAD (1ULL << 1)
 
 #pragma pack(push, 1)
 
@@ -48,17 +52,21 @@ struct bfc_header {
   uint32_t block_size;    // alignment boundary (default 4096)
   uint64_t features;      // feature flags
   uint8_t uuid[16];       // RFC 4122 v4 UUID
-  uint8_t reserved[4056]; // zero-filled
+  uint8_t enc_salt[32];   // salt for key derivation (when using password encryption)
+  uint8_t reserved[4024]; // zero-filled
 };
 
 struct bfc_obj_hdr {
   uint8_t type;       // object type
   uint8_t comp;       // compression type
+  uint8_t enc;        // encryption type
+  uint8_t reserved;   // reserved for future use
   uint16_t name_len;  // length of name in bytes
+  uint16_t padding;   // padding for alignment
   uint32_t mode;      // POSIX mode bits
   uint64_t mtime_ns;  // modification time in nanoseconds
   uint64_t orig_size; // original size
-  uint64_t enc_size;  // encoded size
+  uint64_t enc_size;  // encoded size (after compression + encryption)
   uint32_t crc32c;    // CRC32C of original content
 };
 

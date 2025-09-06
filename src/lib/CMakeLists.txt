@@ -19,6 +19,7 @@ set(BFC_LIB_SOURCES
     bfc_iter.c
     bfc_crc32c.c
     bfc_compress.c
+    bfc_encrypt.c
     bfc_os.c
     bfc_util.c
 )
@@ -27,6 +28,7 @@ set(BFC_LIB_HEADERS
     bfc_format.h
     bfc_crc32c.h
     bfc_compress.h
+    bfc_encrypt.h
     bfc_os.h
     bfc_util.h
 )
@@ -63,6 +65,13 @@ foreach(target bfc bfc_shared)
         target_compile_definitions(${target} PRIVATE BFC_WITH_ZSTD)
         target_include_directories(${target} PRIVATE ${ZSTD_INCLUDE_DIRS})
         target_link_directories(${target} PRIVATE ${ZSTD_LIBRARY_DIRS})
+    endif()
+    
+    if(BFC_WITH_SODIUM)
+        target_link_libraries(${target} ${SODIUM_LIBRARIES})
+        target_compile_definitions(${target} PRIVATE BFC_WITH_SODIUM)
+        target_include_directories(${target} PRIVATE ${SODIUM_INCLUDE_DIRS})
+        target_link_directories(${target} PRIVATE ${SODIUM_LIBRARY_DIRS})
     endif()
 endforeach()
 

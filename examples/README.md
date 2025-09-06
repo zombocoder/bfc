@@ -51,6 +51,38 @@ Demonstrates how to extract files from a BFC container to the filesystem.
 ./extract_example my_container.bfc [output_directory]
 ```
 
+### 4. encrypt_example.c
+Demonstrates encryption and decryption features using ChaCha20-Poly1305 AEAD encryption (requires libsodium support).
+
+**Features shown:**
+- Password-based encryption with Argon2id key derivation
+- Key file encryption with 32-byte raw keys
+- Combining encryption with compression
+- Secure key handling and memory clearing
+- Creating encrypted containers with sensitive data
+- Decrypting and verifying container contents
+- Error handling for authentication failures
+
+**Usage:**
+```bash
+# Demo mode (creates test data and shows all encryption methods)
+./encrypt_example
+
+# Create encrypted container with password
+./encrypt_example create-password secure.bfc mypassword /path/to/files
+
+# Create encrypted container with key file
+./encrypt_example create-keyfile secure.bfc secret.key /path/to/files
+
+# Extract encrypted container with password
+./encrypt_example extract-password secure.bfc mypassword
+
+# Extract encrypted container with key file
+./encrypt_example extract-keyfile secure.bfc secret.key
+```
+
+**Note:** This example is only available when BFC is built with libsodium support (`-DBFC_WITH_SODIUM=ON`).
+
 ## Building the Examples
 
 ### Option 1: Build with main project
@@ -75,11 +107,11 @@ cmake --build .
 
 ## Quick Demo
 
-Here's a quick demo showing all three examples in action:
+Here's a quick demo showing all examples in action:
 
 ```bash
-# Build the project
-cmake -S . -B build
+# Build the project (with encryption support)
+cmake -S . -B build -DBFC_WITH_SODIUM=ON -DBFC_WITH_ZSTD=ON
 cmake --build build
 
 # Go to examples directory
@@ -98,6 +130,12 @@ mkdir extracted
 # Verify extracted content
 ls -la extracted/
 cat extracted/README.md
+
+# Encryption demo (if libsodium is available)
+if [ -f ./encrypt_example ]; then
+    echo "Running encryption demo..."
+    ./encrypt_example
+fi
 ```
 
 ## API Usage Patterns

@@ -317,7 +317,7 @@ static int test_verify_container(void) {
 }
 
 static int test_invalid_container(void) {
-  const char* filename = "/tmp/test_invalid.bfc";
+  const char* filename = "/tmp/reader_test_invalid.bfc";
 
   // Create invalid file
   FILE* f = fopen(filename, "w");
@@ -350,7 +350,7 @@ static int test_error_conditions(void) {
   int result = bfc_open(NULL, &reader);
   assert(result == BFC_E_INVAL);
 
-  result = bfc_open("/tmp/test.bfc", NULL);
+  result = bfc_open("/tmp/reader_test.bfc", NULL);
   assert(result == BFC_E_INVAL);
 
   // Test operations on NULL reader
@@ -510,7 +510,7 @@ static int test_large_file_operations(void) {
 }
 
 static int test_empty_container(void) {
-  const char* filename = "/tmp/test_empty.bfc";
+  const char* filename = "/tmp/reader_test_empty.bfc";
   unlink(filename);
 
   // Create empty container
