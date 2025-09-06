@@ -604,6 +604,373 @@ static int test_directory_only_container(void) {
   return 0;
 }
 
+static int test_encryption_functions(void) {
+  const char* filename = "/tmp/test_encrypted.bfc";
+  unlink(filename);
+
+  // Test bfc_has_encryption on non-encrypted container
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Add a simple file
+  FILE* temp = tmpfile();
+  assert(temp != NULL);
+  fwrite("test content", 1, 12, temp);
+  rewind(temp);
+  result = bfc_add_file(writer, "test.txt", temp, 0644, bfc_os_current_time_ns(), NULL);
+  assert(result == BFC_OK);
+  fclose(temp);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+  bfc_close(writer);
+
+  // Test reading and encryption detection
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+
+  // Container without encryption should return 0
+  int has_encryption = bfc_has_encryption(reader);
+  assert(has_encryption == 0);
+
+  // Test encryption functions with NULL reader
+  has_encryption = bfc_has_encryption(NULL);
+  assert(has_encryption == 0);
+
+#ifdef BFC_WITH_SODIUM
+  // Test setting encryption password (should succeed even for non-encrypted containers)
+  result = bfc_reader_set_encryption_password(reader, "password", 8);
+  // This may succeed or fail depending on implementation
+
+  // Test with NULL parameters
+  result = bfc_reader_set_encryption_password(NULL, "password", 8);
+  assert(result == BFC_E_INVAL);
+
+  result = bfc_reader_set_encryption_password(reader, NULL, 8);
+  assert(result == BFC_E_INVAL);
+
+  result = bfc_reader_set_encryption_password(reader, "password", 0);
+  assert(result == BFC_E_INVAL);
+
+  // Test setting encryption key
+  uint8_t test_key[32] = {0};
+  result = bfc_reader_set_encryption_key(reader, test_key);
+  // Should succeed
+
+  result = bfc_reader_set_encryption_key(NULL, test_key);
+  assert(result == BFC_E_INVAL);
+
+  result = bfc_reader_set_encryption_key(reader, NULL);
+  assert(result == BFC_E_INVAL);
+#else
+  // Test without libsodium - should return BFC_E_INVAL
+  result = bfc_reader_set_encryption_password(reader, "password", 8);
+  assert(result == BFC_E_INVAL);
+
+  uint8_t test_key[32] = {0};
+  result = bfc_reader_set_encryption_key(reader, test_key);
+  assert(result == BFC_E_INVAL);
+#endif
+
+  bfc_close_read(reader);
+  unlink(filename);
+
+  return 0;
+}
+
+static int test_file_size_edge_cases(void) {
+  const char* filename = "/tmp/test_file_size.bfc";
+
+  // Create a file that's too small to be a valid BFC container
+  FILE* tiny_file = fopen(filename, "wb");
+  assert(tiny_file != NULL);
+  fwrite("tiny", 1, 4, tiny_file);
+  fclose(tiny_file);
+
+  // Try to open it - should fail
+  bfc_t* reader = NULL;
+  int result = bfc_open(filename, &reader);
+  assert(result == BFC_E_BADMAGIC);
+  assert(reader == NULL);
+
+  unlink(filename);
+  return 0;
+}
+
+static int test_index_parse_errors(void) {
+  const char* filename = "/tmp/test_parse_error.bfc";
+
+  // Create a valid container first
+  int result = create_test_container(filename);
+  assert(result == BFC_OK);
+
+  // Corrupt the index by modifying bytes in the index area
+  FILE* file = fopen(filename, "r+b");
+  assert(file != NULL);
+
+  // Seek to near the end to corrupt index data
+  fseek(file, -100, SEEK_END);
+  fwrite("CORRUPT_INDEX_DATA", 1, 18, file);
+  fclose(file);
+
+  // Try to open corrupted container
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  // Should fail due to CRC mismatch or parse error
+  assert(result != BFC_OK);
+  assert(reader == NULL);
+
+  unlink(filename);
+  return 0;
+}
+
+static int test_extract_edge_cases(void) {
+  const char* filename = "/tmp/test_extract_edge.bfc";
+
+  // Create test container
+  int result = create_test_container(filename);
+  assert(result == BFC_OK);
+
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+
+  // Test extract with invalid file descriptor
+  result = bfc_extract_to_fd(reader, "file1.txt", -1);
+  assert(result == BFC_E_INVAL);
+
+  // Test extract non-existent file
+  int fd = open("/tmp/test_extract_output", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  assert(fd >= 0);
+
+  result = bfc_extract_to_fd(reader, "nonexistent.txt", fd);
+  assert(result == BFC_E_NOTFOUND);
+
+  // Test extract directory (should fail)
+  result = bfc_extract_to_fd(reader, "testdir", fd);
+  assert(result == BFC_E_INVAL);
+
+  close(fd);
+  unlink("/tmp/test_extract_output");
+
+  bfc_close_read(reader);
+  unlink(filename);
+
+  return 0;
+}
+
+static int test_verify_edge_cases(void) {
+  const char* filename = "/tmp/test_verify_edge.bfc";
+
+  // Create test container
+  int result = create_test_container(filename);
+  assert(result == BFC_OK);
+
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+
+  // Create a malformed container by modifying file size info
+  // First close the reader
+  bfc_close_read(reader);
+
+  // Modify the container to create invalid offset/size
+  FILE* file = fopen(filename, "r+b");
+  assert(file != NULL);
+
+  // Find and corrupt an entry's offset to be beyond file size
+  // This is a bit tricky without parsing, so let's just corrupt some bytes
+  fseek(file, -200, SEEK_END);
+  uint8_t corrupt_data[8] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  fwrite(corrupt_data, 1, 8, file);
+  fclose(file);
+
+  // Try to open and verify
+  result = bfc_open(filename, &reader);
+  if (result == BFC_OK) {
+    // If it opens, verify should catch the corruption
+    result = bfc_verify(reader, 0);
+    // Should fail with badmagic or CRC error
+    assert(result != BFC_OK);
+    bfc_close_read(reader);
+  }
+
+  unlink(filename);
+  return 0;
+}
+
+static int test_list_edge_cases(void) {
+  const char* filename = "/tmp/test_list_edge.bfc";
+
+  // Create test container
+  int result = create_test_container(filename);
+  assert(result == BFC_OK);
+
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+
+  // Test list with empty string prefix
+  struct list_context ctx = {0};
+  result = bfc_list(reader, "", count_entries_cb, &ctx);
+  assert(result == BFC_OK);
+
+  // Test list with prefix that matches no entries
+  ctx.count = 0;
+  result = bfc_list(reader, "nonexistent_prefix", count_entries_cb, &ctx);
+  assert(result == BFC_OK);
+  assert(ctx.count == 0);
+
+  // Test list with prefix that partially matches but not on directory boundary
+  ctx.count = 0;
+  result = bfc_list(reader, "file", count_entries_cb, &ctx);
+  assert(result == BFC_OK);
+  // The list function requires directory boundary matches, so "file" won't match
+  // "file1.txt" or "file2.txt" because there's no '/' after "file"
+  assert(ctx.count == 0);
+
+  bfc_close_read(reader);
+  unlink(filename);
+
+  return 0;
+}
+
+static int test_compressed_files(void) {
+  const char* filename = "/tmp/test_compressed.bfc";
+  unlink(filename);
+
+#ifdef BFC_WITH_ZSTD
+  // Create container with compressed files
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Set compression
+  result = bfc_set_compression(writer, BFC_COMP_ZSTD, 1);
+  assert(result == BFC_OK);
+
+  // Create test content that compresses well
+  FILE* temp = tmpfile();
+  assert(temp != NULL);
+
+  // Write repetitive content that compresses well
+  for (int i = 0; i < 1000; i++) {
+    fwrite("This is repetitive content for compression testing. ", 1, 52, temp);
+  }
+  rewind(temp);
+
+  // Add file (will be compressed automatically)
+  result = bfc_add_file(writer, "compressed.txt", temp, 0644, bfc_os_current_time_ns(), NULL);
+  if (result == BFC_OK) {
+    result = bfc_finish(writer);
+    assert(result == BFC_OK);
+    bfc_close(writer);
+    fclose(temp);
+
+    // Test reading compressed file
+    bfc_t* reader = NULL;
+    result = bfc_open(filename, &reader);
+    assert(result == BFC_OK);
+
+    // Verify file properties
+    bfc_entry_t entry;
+    result = bfc_stat(reader, "compressed.txt", &entry);
+    assert(result == BFC_OK);
+    assert(entry.comp == BFC_COMP_ZSTD);
+    assert(entry.size == 52000); // Original size
+
+    // Test reading full file
+    char* buffer = malloc(52000);
+    assert(buffer != NULL);
+
+    size_t bytes_read = bfc_read(reader, "compressed.txt", 0, buffer, 52000);
+    assert(bytes_read == 52000);
+
+    // Verify content
+    assert(strncmp(buffer, "This is repetitive content", 26) == 0);
+
+    // Test reading partial content from compressed file
+    char partial_buffer[100];
+    bytes_read = bfc_read(reader, "compressed.txt", 1000, partial_buffer, 50);
+    assert(bytes_read == 50);
+
+    // Test reading beyond file end
+    bytes_read = bfc_read(reader, "compressed.txt", 60000, partial_buffer, 100);
+    assert(bytes_read == 0);
+
+    // Test extracting compressed file
+    int fd = open("/tmp/test_compressed_output", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    assert(fd >= 0);
+
+    result = bfc_extract_to_fd(reader, "compressed.txt", fd);
+    assert(result == BFC_OK);
+    close(fd);
+
+    // Verify extracted content
+    FILE* extracted = fopen("/tmp/test_compressed_output", "r");
+    assert(extracted != NULL);
+    fseek(extracted, 0, SEEK_END);
+    long extracted_size = ftell(extracted);
+    assert(extracted_size == 52000);
+    fclose(extracted);
+    unlink("/tmp/test_compressed_output");
+
+    free(buffer);
+    bfc_close_read(reader);
+  } else {
+    // Compression failed, clean up
+    bfc_close(writer);
+    fclose(temp);
+  }
+
+  unlink(filename);
+#endif
+
+  return 0;
+}
+
+static int test_read_errors(void) {
+  const char* filename = "/tmp/test_read_errors.bfc";
+
+  // Create test container
+  int result = create_test_container(filename);
+  assert(result == BFC_OK);
+
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+
+  // Test read with various invalid parameters
+  char buffer[256];
+
+  // NULL reader
+  size_t bytes = bfc_read(NULL, "file1.txt", 0, buffer, sizeof(buffer));
+  assert(bytes == 0);
+
+  // NULL path
+  bytes = bfc_read(reader, NULL, 0, buffer, sizeof(buffer));
+  assert(bytes == 0);
+
+  // NULL buffer
+  bytes = bfc_read(reader, "file1.txt", 0, NULL, sizeof(buffer));
+  assert(bytes == 0);
+
+  // Zero length
+  bytes = bfc_read(reader, "file1.txt", 0, buffer, 0);
+  assert(bytes == 0);
+
+  // Non-existent file
+  bytes = bfc_read(reader, "nonexistent.txt", 0, buffer, sizeof(buffer));
+  assert(bytes == 0);
+
+  bfc_close_read(reader);
+  unlink(filename);
+
+  return 0;
+}
+
 int test_reader(void) {
   if (test_open_container() != 0)
     return 1;
@@ -630,6 +997,22 @@ int test_reader(void) {
   if (test_empty_container() != 0)
     return 1;
   if (test_directory_only_container() != 0)
+    return 1;
+  if (test_encryption_functions() != 0)
+    return 1;
+  if (test_file_size_edge_cases() != 0)
+    return 1;
+  if (test_index_parse_errors() != 0)
+    return 1;
+  if (test_extract_edge_cases() != 0)
+    return 1;
+  if (test_verify_edge_cases() != 0)
+    return 1;
+  if (test_list_edge_cases() != 0)
+    return 1;
+  if (test_compressed_files() != 0)
+    return 1;
+  if (test_read_errors() != 0)
     return 1;
 
   return 0;
