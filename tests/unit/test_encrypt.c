@@ -358,7 +358,7 @@ static int test_end_to_end_encryption(void) {
   unlink(extract_filename);
 
   // Set correct password and try again
-  result = bfc_set_encryption_password(reader, password, strlen(password));
+  result = bfc_reader_set_encryption_password(reader, password, strlen(password));
   assert(result == BFC_OK);
 
   // Verify encryption info in entry metadata
@@ -411,7 +411,7 @@ static int test_end_to_end_encryption(void) {
   assert(result == BFC_OK);
 
   const char* wrong_password = "wrong_password";
-  result = bfc_set_encryption_password(reader, wrong_password, strlen(wrong_password));
+  result = bfc_reader_set_encryption_password(reader, wrong_password, strlen(wrong_password));
   assert(result == BFC_OK); // Setting password should succeed
 
   out_fd = open(extract_filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -486,7 +486,7 @@ static int test_encryption_with_compression(void) {
   result = bfc_open(container_filename, &reader);
   assert(result == BFC_OK);
 
-  result = bfc_set_encryption_password(reader, password, strlen(password));
+  result = bfc_reader_set_encryption_password(reader, password, strlen(password));
   assert(result == BFC_OK);
 
   // Check entry metadata
