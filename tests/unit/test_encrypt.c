@@ -301,9 +301,14 @@ static int test_writer_encryption_settings(void) {
 // Test end-to-end encryption with BFC container
 static int test_end_to_end_encryption(void) {
 #ifdef BFC_WITH_SODIUM
-  const char* container_filename = "/tmp/encrypt_e2e_encryption.bfc";
-  const char* test_filename = "/tmp/encrypt_e2e_input_enc.txt";
-  const char* extract_filename = "/tmp/encrypt_e2e_output_enc.txt";
+  // Use process ID to make filenames unique even across different test runs
+  char container_filename[256];
+  char test_filename[256]; 
+  char extract_filename[256];
+  int pid = getpid();
+  snprintf(container_filename, sizeof(container_filename), "/tmp/encrypt_e2e_%d.bfc", pid);
+  snprintf(test_filename, sizeof(test_filename), "/tmp/encrypt_e2e_input_%d.txt", pid);
+  snprintf(extract_filename, sizeof(extract_filename), "/tmp/encrypt_e2e_output_%d.txt", pid);
 
   // Clean up any existing files
   unlink(container_filename);
@@ -434,9 +439,14 @@ static int test_end_to_end_encryption(void) {
 // Test encryption with compression
 static int test_encryption_with_compression(void) {
 #ifdef BFC_WITH_SODIUM
-  const char* container_filename = "/tmp/encrypt_compress_test.bfc";
-  const char* test_filename = "/tmp/encrypt_compress_input.txt";
-  const char* extract_filename = "/tmp/encrypt_compress_output.txt";
+  // Use process ID to make filenames unique even across different test runs  
+  char container_filename[256];
+  char test_filename[256];
+  char extract_filename[256];
+  int pid = getpid();
+  snprintf(container_filename, sizeof(container_filename), "/tmp/encrypt_compress_%d.bfc", pid);
+  snprintf(test_filename, sizeof(test_filename), "/tmp/encrypt_compress_input_%d.txt", pid);
+  snprintf(extract_filename, sizeof(extract_filename), "/tmp/encrypt_compress_output_%d.txt", pid);
 
   // Clean up any existing files
   unlink(container_filename);
