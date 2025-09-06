@@ -229,10 +229,17 @@ static void show_container_info(bfc_t* reader, const char* container_file, int s
     printf("\n");
   }
 
+  // Check for encryption
+  int has_encryption = bfc_has_encryption(reader);
+
   printf("Summary:\n");
   printf("  Total entries: %d\n", ctx.total_entries);
   printf("  Files: %d\n", ctx.total_files);
   printf("  Directories: %d\n", ctx.total_dirs);
+
+  if (has_encryption) {
+    printf("  Encryption: ChaCha20-Poly1305\n");
+  }
 
   if (ctx.total_size > 0) {
     char size_str[64];
@@ -294,6 +301,22 @@ static void show_entry_info(bfc_t* reader, const char* path) {
     }
 
     printf("Compression: %s\n", comp_name);
+
+    // Show encryption information
+    const char* enc_name;
+    switch (entry.enc) {
+    case BFC_ENC_NONE:
+      enc_name = "none";
+      break;
+    case BFC_ENC_CHACHA20_POLY1305:
+      enc_name = "ChaCha20-Poly1305";
+      break;
+    default:
+      enc_name = "unknown";
+      break;
+    }
+    printf("Encryption: %s\n", enc_name);
+
     printf("Stored size: %s\n", stored_str);
     printf("Storage ratio: %.1f%%\n", ratio * 100.0);
     if (entry.comp != BFC_COMP_NONE && entry.size > 0) {

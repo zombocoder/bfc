@@ -187,6 +187,7 @@ int bfc_header_serialize(const struct bfc_header* hdr, uint8_t buf[BFC_HEADER_SI
   bfc_write_le32(buf + 12, hdr->block_size);
   bfc_write_le64(buf + 16, hdr->features);
   memcpy(buf + 24, hdr->uuid, 16);
+  memcpy(buf + 40, hdr->enc_salt, 32);
 
   // Calculate CRC32 of everything after magic
   uint32_t crc = bfc_crc32c_compute(buf + 12, BFC_HEADER_SIZE - 12);
@@ -210,6 +211,7 @@ int bfc_header_deserialize(const uint8_t buf[BFC_HEADER_SIZE], struct bfc_header
   hdr->block_size = bfc_read_le32(buf + 12);
   hdr->features = bfc_read_le64(buf + 16);
   memcpy(hdr->uuid, buf + 24, 16);
+  memcpy(hdr->enc_salt, buf + 40, 32);
   memset(hdr->reserved, 0, sizeof(hdr->reserved));
 
   // Verify CRC

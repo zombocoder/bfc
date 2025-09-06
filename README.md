@@ -13,6 +13,7 @@ A high-performance, single-file container format for storing files and directori
 - **POSIX metadata** - Preserves permissions, timestamps, and file types
 - **Fast random access** - O(log N) file lookup with sorted index
 - **Optional compression** - ZSTD compression with intelligent content analysis
+- **Optional encryption** - ChaCha20-Poly1305 AEAD with Argon2id key derivation
 - **Integrity validation** - CRC32C checksums with hardware acceleration
 - **Cross-platform** - Works on Linux, macOS, and other Unix systems
 - **Crash-safe writes** - Atomic container creation with index at EOF
@@ -46,8 +47,12 @@ cmake --build build
 ### Prerequisites
 
 - C17 compatible compiler (GCC 7+, Clang 6+)
-- CMake 3.10+
+- CMake 3.15+
 - POSIX-compliant system
+
+**Optional dependencies:**
+- ZSTD library for compression support
+- libsodium for encryption support
 
 ### Build from source
 
@@ -70,9 +75,18 @@ sudo cmake --install build --prefix /usr/local
 ### Build options
 
 ```bash
-# Enable optional features
-cmake -B build -DBFC_WITH_FUSE=ON -DBFC_WITH_ZSTD=ON
+# Enable compression and encryption (recommended)
+cmake -B build -DBFC_WITH_ZSTD=ON -DBFC_WITH_SODIUM=ON
 cmake --build build
+
+# Enable all optional features (requires macFUSE/FUSE3 installation)
+cmake -B build -DBFC_WITH_FUSE=ON -DBFC_WITH_ZSTD=ON -DBFC_WITH_SODIUM=ON
+cmake --build build
+
+# Enable individual features
+cmake -B build -DBFC_WITH_ZSTD=ON        # Compression only
+cmake -B build -DBFC_WITH_SODIUM=ON      # Encryption only  
+cmake -B build -DBFC_WITH_FUSE=ON        # FUSE filesystem support
 
 # Enable code coverage
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBFC_COVERAGE=ON
@@ -131,6 +145,51 @@ bfc info archive.bfc path/to/file.txt
 - **Content analysis** - Text files, repetitive data, and files with patterns compress well
 - **Transparent extraction** - Compressed files are automatically decompressed on extraction
 - **Integrity validation** - CRC32C checksums protect both original and compressed data
+
+### Encryption support
+
+BFC supports optional file encryption using industry-standard ChaCha20-Poly1305 AEAD (Authenticated Encryption with Associated Data) with Argon2id key derivation. When built with libsodium support (`-DBFC_WITH_SODIUM=ON`), containers can encrypt individual files with strong cryptographic protection.
+
+```bash
+# Password-based encryption
+bfc create -e mypassword secure.bfc /sensitive/data/
+
+# Key file encryption (32 bytes)
+echo -n "0123456789abcdef0123456789abcdef" > secret.key
+bfc create -k secret.key secure.bfc /sensitive/data/
+
+# Combine encryption with compression
+bfc create -e mypassword -c zstd archive.bfc /data/
+
+# Extract encrypted container with password
+bfc extract -p mypassword secure.bfc
+
+# Extract with key file
+bfc extract -K secret.key secure.bfc
+
+# View encryption status
+bfc info secure.bfc
+bfc info secure.bfc path/to/file.txt
+# Shows:
+#   Encryption: ChaCha20-Poly1305
+#   Size: 1048576 bytes (1.0 MiB)
+#   Stored size: 1048592 bytes (16 bytes overhead)
+```
+
+**Encryption behavior:**
+- **Strong cryptography** - ChaCha20-Poly1305 AEAD with 256-bit keys and 96-bit nonces
+- **Key derivation** - Argon2id with configurable parameters for password-based encryption
+- **Per-file encryption** - Each file encrypted independently with unique nonces
+- **Authenticated encryption** - Built-in integrity validation prevents tampering
+- **Metadata protection** - File paths and metadata remain in plaintext (container structure visible)
+- **Transparent operation** - Works seamlessly with compression (compress → encrypt pipeline)
+- **Memory security** - Keys securely cleared from memory after use
+
+**Security considerations:**
+- Container structure and file names are **not encrypted** - only file contents
+- Use strong passwords (≥20 characters) or properly generated key files
+- Key derivation uses memory-hard Argon2id to resist brute-force attacks
+- Store key files securely and separately from encrypted containers
 
 ### Listing contents
 
@@ -206,6 +265,15 @@ BFC provides a C library for integration into other applications.
 bfc_t *writer;
 bfc_create("archive.bfc", 4096, 0, &writer);
 
+// Optional: Enable compression
+bfc_set_compression(writer, BFC_COMP_ZSTD, 3);
+
+// Optional: Enable encryption
+bfc_set_encryption_password(writer, "my_password", 11);
+// or use key file:
+// uint8_t key[32] = {...}; // 32-byte key
+// bfc_set_encryption_key(writer, key);
+
 // Add files
 FILE *file = fopen("document.txt", "rb");
 uint32_t crc;
@@ -222,6 +290,9 @@ bfc_close(writer);
 // Read container
 bfc_t *reader;
 bfc_open("archive.bfc", &reader);
+
+// For encrypted containers, set decryption key
+bfc_set_encryption_password(reader, "my_password", 11);
 
 // List entries
 bfc_list(reader, NULL, callback, userdata);
@@ -359,6 +430,15 @@ limitations under the License.
 ```
 
 ## Changelog
+
+### v1.1.0 (Coming Soon)
+
+- **NEW**: ChaCha20-Poly1305 AEAD encryption with libsodium integration
+- **NEW**: Password-based and key-file encryption modes
+- **NEW**: Argon2id key derivation for strong password security
+- **NEW**: Transparent encryption/decryption in CLI and library
+- Enhanced CI/CD pipeline with encryption testing
+- Improved test coverage for encryption code paths
 
 ### v1.0.0
 

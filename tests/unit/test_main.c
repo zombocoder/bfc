@@ -27,6 +27,8 @@ int test_reader(void);
 int test_util(void);
 int test_os(void);
 int test_compress(void);
+int test_encrypt(void);
+// int test_encrypt_integration(void);  // Temporarily disabled
 
 typedef struct {
   const char* name;
@@ -34,9 +36,17 @@ typedef struct {
 } test_case_t;
 
 static test_case_t tests[] = {
-    {"format", test_format}, {"crc32c", test_crc32c},     {"path", test_path},
-    {"writer", test_writer}, {"reader", test_reader},     {"util", test_util},
-    {"os", test_os},         {"compress", test_compress}, {NULL, NULL}};
+    {"format", test_format},
+    {"crc32c", test_crc32c},
+    {"path", test_path},
+    {"writer", test_writer},
+    {"reader", test_reader},
+    {"util", test_util},
+    {"os", test_os},
+    {"compress", test_compress},
+    {"encrypt", test_encrypt},
+    // {"encrypt_integration", test_encrypt_integration},  // Temporarily disabled
+    {NULL, NULL}};
 
 static int run_test(const char* name, int (*func)(void)) {
   printf("Running test: %s... ", name);

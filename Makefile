@@ -45,6 +45,7 @@ configure:
 	cmake -B $(BUILD_DIR) \
 		-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
 		-DBFC_WITH_ZSTD=ON
+		-DBFC_WITH_SODIUM=ON
 
 # Build the project
 build: configure
