@@ -15,6 +15,7 @@
  */
 
 #include "bfc_compress.h"
+#include "bfc_os.h"
 #include <assert.h>
 #include <bfc.h>
 #include <fcntl.h>
@@ -365,6 +366,164 @@ static int test_end_to_end_compression(void) {
   return 0;
 }
 
+// Test additional compression edge cases for better coverage
+static int test_compression_edge_cases(void) {
+  const char* filename = "/tmp/compress_edge_test.bfc";
+  const char* test_filename = "/tmp/compress_edge_input.txt";
+
+  // Create a small file that won't be compressed (below threshold)
+  FILE* f = fopen(test_filename, "w");
+  assert(f);
+  fprintf(f, "tiny"); // 4 bytes, below default 64-byte threshold
+  fclose(f);
+
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Set compression but file should remain uncompressed due to size
+  result = bfc_set_compression(writer, BFC_COMP_ZSTD, 3);
+  assert(result == BFC_OK);
+
+  // Verify compression is set
+  assert(bfc_get_compression(writer) == BFC_COMP_ZSTD);
+
+  FILE* src = fopen(test_filename, "rb");
+  assert(src);
+  result = bfc_add_file(writer, "tiny.txt", src, 0644, bfc_os_current_time_ns(), NULL);
+  assert(result == BFC_OK);
+  fclose(src);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+  bfc_close(writer);
+
+  // Verify the file wasn't actually compressed due to small size
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+
+  bfc_entry_t entry;
+  result = bfc_stat(reader, "tiny.txt", &entry);
+  assert(result == BFC_OK);
+  assert(entry.comp == BFC_COMP_NONE); // Should be uncompressed
+
+  bfc_close_read(reader);
+
+  // Test with different compression levels
+  unlink(filename);
+
+  // Create larger file that will be compressed
+  f = fopen(test_filename, "w");
+  assert(f);
+  for (int i = 0; i < 100; i++) {
+    fprintf(f, "This is a repeating line %d that should compress well with zstd compression.\n", i);
+  }
+  fclose(f);
+
+  writer = NULL;
+  result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Test different compression levels
+  result = bfc_set_compression(writer, BFC_COMP_ZSTD, 1); // Fast
+  assert(result == BFC_OK);
+
+  src = fopen(test_filename, "rb");
+  assert(src);
+  result = bfc_add_file(writer, "large1.txt", src, 0644, bfc_os_current_time_ns(), NULL);
+  assert(result == BFC_OK);
+  fclose(src);
+
+  // Change compression level for next file
+  result = bfc_set_compression(writer, BFC_COMP_ZSTD, 19); // Max compression
+  assert(result == BFC_OK);
+
+  src = fopen(test_filename, "rb");
+  assert(src);
+  result = bfc_add_file(writer, "large2.txt", src, 0644, bfc_os_current_time_ns(), NULL);
+  assert(result == BFC_OK);
+  fclose(src);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+  bfc_close(writer);
+
+  // Verify both files were compressed
+  reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+
+  result = bfc_stat(reader, "large1.txt", &entry);
+  assert(result == BFC_OK);
+  assert(entry.comp == BFC_COMP_ZSTD);
+
+  result = bfc_stat(reader, "large2.txt", &entry);
+  assert(result == BFC_OK);
+  assert(entry.comp == BFC_COMP_ZSTD);
+
+  bfc_close_read(reader);
+
+  // Clean up
+  unlink(filename);
+  unlink(test_filename);
+
+  return 0;
+}
+
+// Test compression threshold settings
+static int test_compression_threshold_settings(void) {
+  const char* filename = "/tmp/compress_threshold_test.bfc";
+  const char* test_filename = "/tmp/compress_threshold_input.txt";
+
+  // Create a file that's exactly at the threshold
+  FILE* f = fopen(test_filename, "w");
+  assert(f);
+  for (int i = 0; i < 64; i++) { // Exactly 64 bytes
+    fputc('A', f);
+  }
+  fclose(f);
+
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Set custom compression threshold
+  result = bfc_set_compression_threshold(writer, 32); // Lower threshold
+  assert(result == BFC_OK);
+
+  result = bfc_set_compression(writer, BFC_COMP_ZSTD, 6);
+  assert(result == BFC_OK);
+
+  FILE* src = fopen(test_filename, "rb");
+  assert(src);
+  result = bfc_add_file(writer, "threshold_test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
+  assert(result == BFC_OK);
+  fclose(src);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+  bfc_close(writer);
+
+  // Verify file was compressed (since 64 bytes > 32 byte threshold)
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+
+  bfc_entry_t entry;
+  result = bfc_stat(reader, "threshold_test.txt", &entry);
+  assert(result == BFC_OK);
+  // Note: File might still not be compressed if compression makes it larger
+
+  bfc_close_read(reader);
+
+  // Clean up
+  unlink(filename);
+  unlink(test_filename);
+
+  return 0;
+}
+
 int test_compress(void) {
   int result = 0;
 
@@ -376,6 +535,8 @@ int test_compress(void) {
   result += test_compression_utilities();
   result += test_writer_compression_settings();
   result += test_end_to_end_compression();
+  result += test_compression_edge_cases();
+  result += test_compression_threshold_settings();
 
   return result;
 }

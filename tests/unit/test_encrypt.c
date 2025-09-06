@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 // Test basic encryption support detection
@@ -589,13 +590,13 @@ static int test_has_encryption_detection(void) {
   bfc_t* writer = NULL;
   int result = bfc_create(unencrypted_container, 4096, 0, &writer);
   assert(result == BFC_OK);
-  
+
   FILE* src = fopen(test_file, "r");
   assert(src);
   result = bfc_add_file(writer, "test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
   assert(result == BFC_OK);
   fclose(src);
-  
+
   result = bfc_finish(writer);
   assert(result == BFC_OK);
   bfc_close(writer);
@@ -607,7 +608,7 @@ static int test_has_encryption_detection(void) {
     printf("Failed to open unencrypted container: %d\n", result);
     return 1;
   }
-  
+
   assert(bfc_has_encryption(reader) == 0); // Should return 0 for unencrypted
   bfc_close_read(reader);
 
@@ -615,17 +616,17 @@ static int test_has_encryption_detection(void) {
   writer = NULL;
   result = bfc_create(encrypted_container, 4096, 0, &writer);
   assert(result == BFC_OK);
-  
+
   const char* password = "test_password";
   result = bfc_set_encryption_password(writer, password, strlen(password));
   assert(result == BFC_OK);
-  
+
   src = fopen(test_file, "r");
   assert(src);
   result = bfc_add_file(writer, "test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
   assert(result == BFC_OK);
   fclose(src);
-  
+
   result = bfc_finish(writer);
   assert(result == BFC_OK);
   bfc_close(writer);
@@ -634,7 +635,7 @@ static int test_has_encryption_detection(void) {
   reader = NULL;
   result = bfc_open(encrypted_container, &reader);
   assert(result == BFC_OK);
-  
+
   assert(bfc_has_encryption(reader) == 1); // Should return 1 for encrypted
   bfc_close_read(reader);
 
@@ -734,6 +735,230 @@ static int test_encryption_error_paths(void) {
   return 0;
 }
 
+// Test additional encryption functions for better coverage
+static int test_additional_encryption_coverage(void) {
+#ifdef BFC_WITH_SODIUM
+  char container_filename[256];
+  char test_filename[256];
+  int pid = getpid();
+  snprintf(container_filename, sizeof(container_filename), "/tmp/test_additional_%d.bfc", pid);
+  snprintf(test_filename, sizeof(test_filename), "/tmp/test_additional_file_%d.txt", pid);
+
+  // Create a larger test file to trigger more code paths
+  FILE* f = fopen(test_filename, "w");
+  assert(f);
+  for (int i = 0; i < 1000; i++) {
+    fprintf(f,
+            "This is line %d of test content to ensure we have enough data for compression and "
+            "encryption testing.\n",
+            i);
+  }
+  fclose(f);
+
+  // Test encrypted container with compression
+  bfc_t* writer = NULL;
+  int result = bfc_create(container_filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Set compression first
+  result = bfc_set_compression(writer, BFC_COMP_ZSTD, 6);
+  assert(result == BFC_OK);
+
+  // Then set encryption
+  const char* password = "additional_test_password";
+  result = bfc_set_encryption_password(writer, password, strlen(password));
+  assert(result == BFC_OK);
+
+  FILE* src = fopen(test_filename, "r");
+  assert(src);
+  result = bfc_add_file(writer, "large_test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
+  assert(result == BFC_OK);
+  fclose(src);
+
+  // Add a directory entry too
+  result = bfc_add_dir(writer, "testdir", 0755, bfc_os_current_time_ns());
+  assert(result == BFC_OK);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+  bfc_close(writer);
+
+  // Test reading back with correct password
+  bfc_t* reader = NULL;
+  result = bfc_open(container_filename, &reader);
+  assert(result == BFC_OK);
+
+  result = bfc_reader_set_encryption_password(reader, password, strlen(password));
+  assert(result == BFC_OK);
+
+  // Test has encryption
+  assert(bfc_has_encryption(reader) == 1);
+
+  // Test stat function
+  bfc_entry_t entry;
+  result = bfc_stat(reader, "large_test.txt", &entry);
+  assert(result == BFC_OK);
+  assert(entry.enc == BFC_ENC_CHACHA20_POLY1305);
+  assert(entry.comp == BFC_COMP_ZSTD);
+
+  // Test directory stat
+  result = bfc_stat(reader, "testdir", &entry);
+  assert(result == BFC_OK);
+  assert(S_ISDIR(entry.mode));
+
+  // Test extraction to temporary file
+  FILE* tmp = tmpfile();
+  assert(tmp);
+  int tmp_fd = fileno(tmp);
+  result = bfc_extract_to_fd(reader, "large_test.txt", tmp_fd);
+  assert(result == BFC_OK);
+  fclose(tmp);
+
+  bfc_close_read(reader);
+
+  // Test with wrong password to trigger error paths
+  reader = NULL;
+  result = bfc_open(container_filename, &reader);
+  assert(result == BFC_OK);
+
+  const char* wrong_password = "wrong_password";
+  result = bfc_reader_set_encryption_password(reader, wrong_password, strlen(wrong_password));
+  assert(result == BFC_OK); // Setting wrong password succeeds
+
+  // Try to extract - should fail
+  tmp = tmpfile();
+  assert(tmp);
+  tmp_fd = fileno(tmp);
+  result = bfc_extract_to_fd(reader, "large_test.txt", tmp_fd);
+  assert(result != BFC_OK); // Should fail with wrong password
+  fclose(tmp);
+
+  bfc_close_read(reader);
+
+  // Clean up
+  unlink(container_filename);
+  unlink(test_filename);
+#endif
+
+  return 0;
+}
+
+// Test encryption key management edge cases
+static int test_encryption_key_edge_cases(void) {
+#ifdef BFC_WITH_SODIUM
+  char container_filename[256];
+  char test_filename[256];
+  int pid = getpid();
+  snprintf(container_filename, sizeof(container_filename), "/tmp/test_key_edge_%d.bfc", pid);
+  snprintf(test_filename, sizeof(test_filename), "/tmp/test_key_edge_file_%d.txt", pid);
+
+  // Create test file
+  FILE* f = fopen(test_filename, "w");
+  assert(f);
+  fprintf(f, "Key edge case test content");
+  fclose(f);
+
+  // Test encryption key from bytes
+  bfc_t* writer = NULL;
+  int result = bfc_create(container_filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  uint8_t key[32];
+  for (int i = 0; i < 32; i++) {
+    key[i] = (uint8_t) (i * 7 + 13); // Some pattern
+  }
+
+  result = bfc_set_encryption_key(writer, key);
+  assert(result == BFC_OK);
+
+  FILE* src = fopen(test_filename, "r");
+  assert(src);
+  result = bfc_add_file(writer, "key_test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
+  assert(result == BFC_OK);
+  fclose(src);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+  bfc_close(writer);
+
+  // Test reading with the same key
+  bfc_t* reader = NULL;
+  result = bfc_open(container_filename, &reader);
+  assert(result == BFC_OK);
+
+  result = bfc_reader_set_encryption_key(reader, key);
+  assert(result == BFC_OK);
+
+  assert(bfc_has_encryption(reader) == 1);
+
+  bfc_entry_t entry;
+  result = bfc_stat(reader, "key_test.txt", &entry);
+  assert(result == BFC_OK);
+  assert(entry.enc == BFC_ENC_CHACHA20_POLY1305);
+
+  bfc_close_read(reader);
+
+  // Test clearing encryption (for writer coverage)
+  writer = NULL;
+  result = bfc_create("/tmp/test_clear_enc.bfc", 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  result = bfc_set_encryption_password(writer, "temp", 4);
+  assert(result == BFC_OK);
+
+  result = bfc_clear_encryption(writer);
+  assert(result == BFC_OK);
+
+  // Verify encryption is cleared
+  assert(bfc_get_encryption(writer) == BFC_ENC_NONE);
+
+  bfc_close(writer);
+  unlink("/tmp/test_clear_enc.bfc");
+
+  // Clean up
+  unlink(container_filename);
+  unlink(test_filename);
+#endif
+
+  return 0;
+}
+
+// Test simple encryption edge cases for coverage
+static int test_encrypt_simple_coverage(void) {
+#ifdef BFC_WITH_SODIUM
+  // Test support detection for invalid encryption type
+  assert(bfc_encrypt_is_supported(255) == 0);
+  assert(bfc_encrypt_is_supported(BFC_ENC_NONE) == 1);
+
+  // Test salt generation
+  uint8_t salt1[32], salt2[32];
+  int result = bfc_encrypt_generate_salt(salt1);
+  assert(result == BFC_OK);
+
+  result = bfc_encrypt_generate_salt(salt2);
+  assert(result == BFC_OK);
+
+  // Should generate different salts
+  assert(memcmp(salt1, salt2, 32) != 0);
+
+  // Test key derivation with different salt
+  bfc_encrypt_key_t key1, key2;
+  result = bfc_encrypt_key_from_password("test", 4, salt1, &key1);
+  assert(result == BFC_OK);
+
+  result = bfc_encrypt_key_from_password("test", 4, salt2, &key2);
+  assert(result == BFC_OK);
+
+  // Same password with different salt should produce different keys
+  assert(memcmp(&key1, &key2, sizeof(bfc_encrypt_key_t)) != 0);
+
+  bfc_encrypt_key_clear(&key1);
+  bfc_encrypt_key_clear(&key2);
+#endif
+
+  return 0;
+}
+
 int test_encrypt(void) {
   int result = 0;
 
@@ -749,6 +974,9 @@ int test_encrypt(void) {
   result += test_encrypt_utility_coverage();
   result += test_has_encryption_detection();
   result += test_encryption_error_paths();
+  result += test_additional_encryption_coverage();
+  result += test_encryption_key_edge_cases();
+  result += test_encrypt_simple_coverage();
 
   return result;
 }
