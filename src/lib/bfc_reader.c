@@ -17,6 +17,7 @@
 #define _GNU_SOURCE
 #include "bfc_compress.h"
 #include "bfc_crc32c.h"
+#include "bfc_encrypt.h"
 #include "bfc_format.h"
 #include "bfc_os.h"
 #include "bfc_util.h"
@@ -36,6 +37,7 @@ typedef struct {
   uint32_t mode;
   uint64_t mtime_ns;
   uint32_t comp;
+  uint32_t enc;
   uint64_t orig_size;
   uint32_t crc32c;
 } bfc_reader_entry_t;
@@ -56,6 +58,11 @@ struct bfc {
 
   // File size
   uint64_t file_size;
+
+  // Encryption settings
+  int has_encryption_key;
+  uint8_t encryption_key[32];
+  uint8_t encryption_salt[32];
 };
 
 static int compare_entries_by_path(const void* a, const void* b) {
@@ -239,7 +246,7 @@ int bfc_open(const char* filename, bfc_t** out) {
       r->entries[i].path[path_len] = '\0';
       ptr += path_len;
 
-      if (ptr + 44 > end) { // 8+8+4+8+4+8+4 = 44 bytes
+      if (ptr + 48 > end) { // 8+8+4+8+4+4+8+4 = 48 bytes
         goto parse_error;
       }
 
@@ -248,9 +255,10 @@ int bfc_open(const char* filename, bfc_t** out) {
       r->entries[i].mode = bfc_read_le32(ptr + 16);
       r->entries[i].mtime_ns = bfc_read_le64(ptr + 20);
       r->entries[i].comp = bfc_read_le32(ptr + 28);
-      r->entries[i].orig_size = bfc_read_le64(ptr + 32);
-      r->entries[i].crc32c = bfc_read_le32(ptr + 40);
-      ptr += 44;
+      r->entries[i].enc = bfc_read_le32(ptr + 32);
+      r->entries[i].orig_size = bfc_read_le64(ptr + 36);
+      r->entries[i].crc32c = bfc_read_le32(ptr + 44);
+      ptr += 48;
     }
 
     // Sort entries by path for binary search
@@ -348,6 +356,7 @@ int bfc_stat(bfc_t* r, const char* container_path, bfc_entry_t* out) {
   out->mode = entry->mode;
   out->mtime_ns = entry->mtime_ns;
   out->comp = entry->comp;
+  out->enc = entry->enc;
   out->size = entry->orig_size;
   out->crc32c = entry->crc32c;
   out->obj_offset = entry->obj_offset;
@@ -434,23 +443,62 @@ static size_t read_compressed_file(bfc_t* r, bfc_reader_entry_t* entry, uint64_t
     return 0;
   }
 
-  // Read compressed data
-  void* compressed_data = malloc(obj_hdr.enc_size);
-  if (!compressed_data) {
+  // Read encrypted/compressed data
+  void* raw_data = malloc(obj_hdr.enc_size);
+  if (!raw_data) {
     return 0;
   }
 
-  size_t compressed_read = fread(compressed_data, 1, obj_hdr.enc_size, r->file);
-  if (compressed_read != obj_hdr.enc_size) {
-    free(compressed_data);
+  size_t raw_read = fread(raw_data, 1, obj_hdr.enc_size, r->file);
+  if (raw_read != obj_hdr.enc_size) {
+    free(raw_data);
     return 0;
+  }
+
+  // Decrypt if needed
+  void* data_to_decompress = raw_data;
+  size_t data_size = obj_hdr.enc_size;
+  void* decrypted_data = NULL;
+
+  if (entry->enc != BFC_ENC_NONE) {
+    if (!r->has_encryption_key) {
+      free(raw_data);
+      return 0; // No decryption key available
+    }
+
+    // Create decryption key structure
+    bfc_encrypt_key_t decrypt_key;
+    int result = bfc_encrypt_key_from_bytes(r->encryption_key, &decrypt_key);
+    if (result != BFC_OK) {
+      free(raw_data);
+      return 0;
+    }
+
+    // Decrypt the data
+    bfc_decrypt_result_t decrypt_result =
+        bfc_decrypt_data(&decrypt_key, raw_data, obj_hdr.enc_size, entry->path, strlen(entry->path),
+                         obj_hdr.orig_size);
+    bfc_encrypt_key_clear(&decrypt_key);
+
+    if (decrypt_result.error != BFC_OK) {
+      free(raw_data);
+      return 0;
+    }
+
+    decrypted_data = decrypt_result.data;
+    data_to_decompress = decrypted_data;
+    data_size = decrypt_result.decrypted_size;
   }
 
   // Decompress the data
   bfc_decompress_result_t decomp_result =
-      bfc_decompress_data(entry->comp, compressed_data, obj_hdr.enc_size, obj_hdr.orig_size);
+      bfc_decompress_data(entry->comp, data_to_decompress, data_size, obj_hdr.orig_size);
 
-  free(compressed_data);
+  // Clean up
+  free(raw_data);
+  if (decrypted_data) {
+    free(decrypted_data);
+  }
 
   if (decomp_result.error != BFC_OK || !decomp_result.data) {
     return 0;
@@ -614,10 +662,50 @@ int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd) {
       return BFC_E_IO;
     }
 
+    // Decrypt if needed
+    void* data_to_decompress = compressed_data;
+    size_t data_size = obj_hdr.enc_size;
+    void* decrypted_data = NULL;
+
+    if (entry->enc != BFC_ENC_NONE) {
+      if (!r->has_encryption_key) {
+        free(compressed_data);
+        return BFC_E_PERM; // No decryption key available
+      }
+
+      // Create decryption key structure using stored key
+      bfc_encrypt_key_t decrypt_key;
+      int result = bfc_encrypt_key_from_bytes(r->encryption_key, &decrypt_key);
+      if (result != BFC_OK) {
+        free(compressed_data);
+        return BFC_E_IO;
+      }
+
+      // Decrypt the data
+      bfc_decrypt_result_t decrypt_result =
+          bfc_decrypt_data(&decrypt_key, compressed_data, obj_hdr.enc_size, entry->path,
+                           strlen(entry->path), obj_hdr.orig_size);
+      bfc_encrypt_key_clear(&decrypt_key);
+
+      if (decrypt_result.error != BFC_OK) {
+        free(compressed_data);
+        return decrypt_result.error;
+      }
+
+      decrypted_data = decrypt_result.data;
+      data_to_decompress = decrypted_data;
+      data_size = decrypt_result.decrypted_size;
+    }
+
     // Decompress
     bfc_decompress_result_t decomp_result =
-        bfc_decompress_data(entry->comp, compressed_data, obj_hdr.enc_size, obj_hdr.orig_size);
+        bfc_decompress_data(entry->comp, data_to_decompress, data_size, obj_hdr.orig_size);
+
+    // Clean up
     free(compressed_data);
+    if (decrypted_data) {
+      free(decrypted_data);
+    }
 
     if (decomp_result.error != BFC_OK || !decomp_result.data) {
       return BFC_E_IO;
@@ -648,36 +736,94 @@ int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd) {
       return BFC_E_IO;
     }
   } else {
-    // Uncompressed file - stream directly
-    uint8_t buffer[READ_BUFFER_SIZE];
-    uint64_t remaining = entry->orig_size;
-    bfc_crc32c_ctx_t crc_ctx;
-    bfc_crc32c_reset(&crc_ctx);
+    // Uncompressed file
+    if (entry->enc != BFC_ENC_NONE) {
+      // Encrypted uncompressed file - need to read all, decrypt, then stream
+      if (!r->has_encryption_key) {
+        return BFC_E_PERM;
+      }
 
-    while (remaining > 0) {
-      size_t chunk = remaining > sizeof(buffer) ? sizeof(buffer) : (size_t) remaining;
-      size_t bytes_read = fread(buffer, 1, chunk, r->file);
-
-      if (bytes_read == 0) {
+      // Read all encrypted data
+      void* encrypted_data = malloc(obj_hdr.enc_size);
+      if (!encrypted_data) {
         return BFC_E_IO;
       }
 
-      if (write(out_fd, buffer, bytes_read) != (ssize_t) bytes_read) {
+      size_t encrypted_read = fread(encrypted_data, 1, obj_hdr.enc_size, r->file);
+      if (encrypted_read != obj_hdr.enc_size) {
+        free(encrypted_data);
         return BFC_E_IO;
       }
 
-      bfc_crc32c_update(&crc_ctx, buffer, bytes_read);
-      remaining -= bytes_read;
-
-      if (bytes_read < chunk) {
-        break; // EOF
+      // Create decryption key structure
+      bfc_encrypt_key_t decrypt_key;
+      int result = bfc_encrypt_key_from_bytes(r->encryption_key, &decrypt_key);
+      if (result != BFC_OK) {
+        free(encrypted_data);
+        return BFC_E_IO;
       }
-    }
 
-    // Verify CRC
-    uint32_t calculated_crc = bfc_crc32c_final(&crc_ctx);
-    if (calculated_crc != entry->crc32c) {
-      return BFC_E_CRC;
+      // Decrypt the data
+      bfc_decrypt_result_t decrypt_result =
+          bfc_decrypt_data(&decrypt_key, encrypted_data, obj_hdr.enc_size, entry->path,
+                           strlen(entry->path), obj_hdr.orig_size);
+      bfc_encrypt_key_clear(&decrypt_key);
+      free(encrypted_data);
+
+      if (decrypt_result.error != BFC_OK) {
+        return decrypt_result.error;
+      }
+
+      // Validate CRC of decrypted data
+      bfc_crc32c_ctx_t crc_ctx;
+      bfc_crc32c_reset(&crc_ctx);
+      bfc_crc32c_update(&crc_ctx, decrypt_result.data, decrypt_result.decrypted_size);
+      uint32_t calculated_crc = bfc_crc32c_final(&crc_ctx);
+
+      if (calculated_crc != entry->crc32c) {
+        free(decrypt_result.data);
+        return BFC_E_CRC;
+      }
+
+      // Write decrypted data to output
+      ssize_t written = write(out_fd, decrypt_result.data, decrypt_result.decrypted_size);
+      free(decrypt_result.data);
+
+      if (written != (ssize_t) decrypt_result.decrypted_size) {
+        return BFC_E_IO;
+      }
+    } else {
+      // Uncompressed, unencrypted file - stream directly
+      uint8_t buffer[READ_BUFFER_SIZE];
+      uint64_t remaining = entry->orig_size;
+      bfc_crc32c_ctx_t crc_ctx;
+      bfc_crc32c_reset(&crc_ctx);
+
+      while (remaining > 0) {
+        size_t chunk = remaining > sizeof(buffer) ? sizeof(buffer) : (size_t) remaining;
+        size_t bytes_read = fread(buffer, 1, chunk, r->file);
+
+        if (bytes_read == 0) {
+          return BFC_E_IO;
+        }
+
+        if (write(out_fd, buffer, bytes_read) != (ssize_t) bytes_read) {
+          return BFC_E_IO;
+        }
+
+        bfc_crc32c_update(&crc_ctx, buffer, bytes_read);
+        remaining -= bytes_read;
+
+        if (bytes_read < chunk) {
+          break; // EOF
+        }
+      }
+
+      // Verify CRC for unencrypted streaming case
+      uint32_t calculated_crc = bfc_crc32c_final(&crc_ctx);
+      if (calculated_crc != entry->crc32c) {
+        return BFC_E_CRC;
+      }
     }
   }
 
@@ -752,4 +898,68 @@ int bfc_verify(bfc_t* r, int deep) {
   }
 
   return BFC_OK;
+}
+
+/* --- Encryption Functions for Reader --- */
+
+int bfc_has_encryption(bfc_t* r) {
+  if (!r) {
+    return 0;
+  }
+
+  // Check if any entries use encryption
+  for (uint32_t i = 0; i < r->entry_count; i++) {
+    if (r->entries[i].enc != BFC_ENC_NONE) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+// Reader-specific encryption password setting
+int bfc_reader_set_encryption_password(bfc_t* r, const char* password, size_t password_len) {
+  if (!r || !password || password_len == 0) {
+    return BFC_E_INVAL;
+  }
+
+#ifndef BFC_WITH_SODIUM
+  (void) password_len;
+  return BFC_E_INVAL; // Encryption not supported
+#else
+  // Create encryption key using salt from header
+  bfc_encrypt_key_t key;
+  int result = bfc_encrypt_key_from_password(password, password_len, r->header.enc_salt, &key);
+  if (result != BFC_OK) {
+    return result;
+  }
+
+  // Store key and salt in reader
+  memcpy(r->encryption_key, key.key, sizeof(r->encryption_key));
+  memcpy(r->encryption_salt, key.salt, sizeof(r->encryption_salt));
+  r->has_encryption_key = 1;
+
+  // Clear sensitive key material
+  bfc_encrypt_key_clear(&key);
+
+  return BFC_OK;
+#endif
+}
+
+// Reader-specific encryption key setting from raw bytes
+int bfc_reader_set_encryption_key(bfc_t* r, const uint8_t key[32]) {
+  if (!r || !key) {
+    return BFC_E_INVAL;
+  }
+
+#ifndef BFC_WITH_SODIUM
+  return BFC_E_INVAL; // Encryption not supported
+#else
+  // Store key directly
+  memcpy(r->encryption_key, key, sizeof(r->encryption_key));
+  memset(r->encryption_salt, 0, sizeof(r->encryption_salt)); // No salt for raw keys
+  r->has_encryption_key = 1;
+
+  return BFC_OK;
+#endif
 }

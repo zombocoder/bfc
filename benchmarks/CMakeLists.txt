@@ -42,36 +42,63 @@ target_include_directories(benchmark_compress PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src/lib)
 
+# Encryption benchmark
+if(BFC_WITH_SODIUM)
+    add_executable(benchmark_encrypt benchmark_encrypt.c)
+    target_link_libraries(benchmark_encrypt bfc)
+    target_include_directories(benchmark_encrypt PRIVATE 
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src/lib)
+endif()
+
 # All benchmarks runner
 add_executable(benchmark_all benchmark_all.c)
+target_link_libraries(benchmark_all bfc)
 target_include_directories(benchmark_all PRIVATE 
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src/lib)
 
-# Link ZSTD if enabled (needed for static library dependencies)
+# Configure optional dependencies for all benchmarks
+set(all_benchmark_targets benchmark_writer benchmark_reader benchmark_crc32c benchmark_compress benchmark_all)
+if(BFC_WITH_SODIUM)
+    list(APPEND all_benchmark_targets benchmark_encrypt)
+endif()
+
+# Link ZSTD if enabled (avoid duplicates by handling all targets together)
 if(BFC_WITH_ZSTD)
-    foreach(target benchmark_writer benchmark_reader benchmark_crc32c benchmark_compress)
+    foreach(target ${all_benchmark_targets})
         target_link_libraries(${target} ${ZSTD_LIBRARIES})
         target_link_directories(${target} PRIVATE ${ZSTD_LIBRARY_DIRS})
         target_compile_definitions(${target} PRIVATE BFC_WITH_ZSTD)
     endforeach()
 endif()
 
+# Link libsodium if enabled (avoid duplicates by handling all targets together)  
+if(BFC_WITH_SODIUM)
+    foreach(target ${all_benchmark_targets})
+        target_link_libraries(${target} ${SODIUM_LIBRARIES})
+        target_link_directories(${target} PRIVATE ${SODIUM_LIBRARY_DIRS})
+        target_compile_definitions(${target} PRIVATE BFC_WITH_SODIUM)
+    endforeach()
+endif()
+
 # Install benchmarks
+set(benchmark_targets benchmark_writer benchmark_reader benchmark_crc32c benchmark_compress)
+if(BFC_WITH_SODIUM)
+    list(APPEND benchmark_targets benchmark_encrypt)
+endif()
 install(TARGETS 
-        benchmark_writer 
-        benchmark_reader 
-        benchmark_crc32c
-        benchmark_compress
+        ${benchmark_targets}
         benchmark_all
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/benchmarks)
 
 # Install benchmark source code and results
+set(benchmark_sources benchmark_writer.c benchmark_reader.c benchmark_crc32c.c benchmark_compress.c)
+if(BFC_WITH_SODIUM)
+    list(APPEND benchmark_sources benchmark_encrypt.c)
+endif()
 install(FILES 
-        benchmark_writer.c
-        benchmark_reader.c
-        benchmark_crc32c.c
-        benchmark_compress.c
+        ${benchmark_sources}
         benchmark_all.c
         benchmark_common.h
         CMakeLists.txt
@@ -103,9 +130,21 @@ add_custom_target(bench-compress
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Running compression performance benchmark")
 
+if(BFC_WITH_SODIUM)
+    add_custom_target(bench-encrypt
+        COMMAND benchmark_encrypt
+        DEPENDS benchmark_encrypt
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running encryption performance benchmark")
+endif()
+
+set(bench_all_deps benchmark_all benchmark_writer benchmark_reader benchmark_crc32c benchmark_compress)
+if(BFC_WITH_SODIUM)
+    list(APPEND bench_all_deps benchmark_encrypt)
+endif()
 add_custom_target(bench-all
     COMMAND benchmark_all
-    DEPENDS benchmark_all benchmark_writer benchmark_reader benchmark_crc32c benchmark_compress
+    DEPENDS ${bench_all_deps}
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Running all performance benchmarks")
 

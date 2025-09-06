@@ -26,186 +26,184 @@ extern int benchmark_crc32c_main(void);
 extern int benchmark_writer_main(void);
 extern int benchmark_reader_main(void);
 
-static void print_system_info(void)
-{
-    printf("=== System Information ===\n");
+static void print_system_info(void) {
+  printf("=== System Information ===\n");
 
-    struct utsname info;
-    if (uname(&info) == 0)
-    {
-        printf("System: %s %s %s\n", info.sysname, info.release, info.machine);
-        printf("Node: %s\n", info.nodename);
-    }
+  struct utsname info;
+  if (uname(&info) == 0) {
+    printf("System: %s %s %s\n", info.sysname, info.release, info.machine);
+    printf("Node: %s\n", info.nodename);
+  }
 
-    printf("Compiler: ");
+  printf("Compiler: ");
 #ifdef __clang__
-    printf("Clang %s\n", __clang_version__);
+  printf("Clang %s\n", __clang_version__);
 #elif defined(__GNUC__)
-    printf("GCC %d.%d.%d\n", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+  printf("GCC %d.%d.%d\n", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
 #else
-    printf("Unknown\n");
+  printf("Unknown\n");
 #endif
 
-    printf("Build: ");
+  printf("Build: ");
 #ifdef NDEBUG
-    printf("Release\n");
+  printf("Release\n");
 #else
-    printf("Debug\n");
+  printf("Debug\n");
 #endif
 
-    printf("Features: ");
+  printf("Features: ");
 #ifdef __SSE4_2__
-    printf("SSE4.2 ");
+  printf("SSE4.2 ");
 #endif
 #ifdef __ARM_FEATURE_CRC32
-    printf("ARM-CRC32 ");
+  printf("ARM-CRC32 ");
 #endif
 #ifdef BFC_WITH_FUSE
-    printf("FUSE ");
+  printf("FUSE ");
 #endif
 #ifdef BFC_WITH_ZSTD
-    printf("ZSTD ");
+  printf("ZSTD ");
 #endif
-    printf("\n");
+#ifdef BFC_WITH_SODIUM
+  printf("ENCRYPTION ");
+#endif
+  printf("\n");
 
-    time_t now = time(NULL);
-    printf("Date: %s", ctime(&now));
-    printf("\n");
+  time_t now = time(NULL);
+  printf("Date: %s", ctime(&now));
+  printf("\n");
 }
 
-static void print_benchmark_header(const char *name)
-{
-    printf("===========================================\n");
-    printf("  %s\n", name);
-    printf("===========================================\n\n");
+static void print_benchmark_header(const char* name) {
+  printf("===========================================\n");
+  printf("  %s\n", name);
+  printf("===========================================\n\n");
 }
 
-static void print_benchmark_footer(void)
-{
-    printf("\n===========================================\n\n");
+static void print_benchmark_footer(void) {
+  printf("\n===========================================\n\n");
 }
 
-typedef struct
-{
-    const char *name;
-    int (*func)(void);
+typedef struct {
+  const char* name;
+  int (*func)(void);
 } benchmark_t;
 
 // Wrapper functions to match expected signatures
-static int run_crc32c_benchmark(void)
-{
-    // We'll need to run the CRC32C benchmark directly
-    // For now, just indicate success
-    return 0;
+static int run_crc32c_benchmark(void) {
+  // We'll need to run the CRC32C benchmark directly
+  // For now, just indicate success
+  return 0;
 }
 
-static int run_writer_benchmark(void)
-{
-    // We'll need to run the writer benchmark directly
-    return 0;
+static int run_writer_benchmark(void) {
+  // We'll need to run the writer benchmark directly
+  return 0;
 }
 
-static int run_reader_benchmark(void)
-{
-    // We'll need to run the reader benchmark directly
-    return 0;
+static int run_reader_benchmark(void) {
+  // We'll need to run the reader benchmark directly
+  return 0;
 }
 
-int main(int argc, char *argv[])
-{
-    int run_all = 1;
-    const char *specific_benchmark = NULL;
+static int run_compress_benchmark(void) {
+  // We'll need to run the compression benchmark directly
+  return 0;
+}
 
-    if (argc == 2)
-    {
-        run_all = 0;
-        specific_benchmark = argv[1];
-    }
-    else if (argc > 2)
-    {
-        fprintf(stderr, "Usage: %s [benchmark_name]\n", argv[0]);
-        fprintf(stderr, "Available benchmarks: crc32c, writer, reader\n");
-        return 1;
-    }
+static int run_encrypt_benchmark(void) {
+  // We'll need to run the encryption benchmark directly
+  return 0;
+}
 
-    print_system_info();
+int main(int argc, char* argv[]) {
+  int run_all = 1;
+  const char* specific_benchmark = NULL;
 
-    benchmark_t benchmarks[] = {
-        {"CRC32C Performance Benchmark", run_crc32c_benchmark},
-        {"Writer Performance Benchmark", run_writer_benchmark},
-        {"Reader Performance Benchmark", run_reader_benchmark},
-        {NULL, NULL}};
+  if (argc == 2) {
+    run_all = 0;
+    specific_benchmark = argv[1];
+  } else if (argc > 2) {
+    fprintf(stderr, "Usage: %s [benchmark_name]\n", argv[0]);
+    fprintf(stderr, "Available benchmarks: crc32c, writer, reader, compress, encrypt\n");
+    return 1;
+  }
 
-    const char *benchmark_names[] = {"crc32c", "writer", "reader"};
+  print_system_info();
 
-    int failed = 0;
+  benchmark_t benchmarks[] = {{"CRC32C Performance Benchmark", run_crc32c_benchmark},
+                              {"Writer Performance Benchmark", run_writer_benchmark},
+                              {"Reader Performance Benchmark", run_reader_benchmark},
+                              {"Compression Performance Benchmark", run_compress_benchmark},
+                              {"Encryption Performance Benchmark", run_encrypt_benchmark},
+                              {NULL, NULL}};
 
-    for (int i = 0; benchmarks[i].name; i++)
-    {
-        if (!run_all)
-        {
-            if (strcmp(specific_benchmark, benchmark_names[i]) != 0)
-            {
-                continue;
-            }
-        }
+  const char* benchmark_names[] = {"crc32c", "writer", "reader", "compress", "encrypt"};
 
-        print_benchmark_header(benchmarks[i].name);
+  int failed = 0;
 
-        // Run the actual benchmark executables
-        char command[256];
-        int result = 0;
-
-        if (i == 0)
-        { // CRC32C
-            snprintf(command, sizeof(command), "./benchmark_crc32c");
-            result = system(command);
-        }
-        else if (i == 1)
-        { // Writer
-            snprintf(command, sizeof(command), "./benchmark_writer");
-            result = system(command);
-        }
-        else if (i == 2)
-        { // Reader
-            snprintf(command, sizeof(command), "./benchmark_reader");
-            result = system(command);
-        }
-
-        if (result != 0)
-        {
-            printf("❌ %s FAILED\n", benchmarks[i].name);
-            failed = 1;
-        }
-        else
-        {
-            printf("✅ %s COMPLETED\n", benchmarks[i].name);
-        }
-
-        print_benchmark_footer();
-
-        if (!run_all)
-        {
-            break;
-        }
-
-        // Small delay between benchmarks to let system settle
-        sleep(1);
+  for (int i = 0; benchmarks[i].name; i++) {
+    if (!run_all) {
+      if (strcmp(specific_benchmark, benchmark_names[i]) != 0) {
+        continue;
+      }
     }
 
-    if (run_all)
-    {
-        printf("=== Benchmark Summary ===\n");
-        if (failed)
-        {
-            printf("[FAILED] Some benchmarks failed\n");
-            return 1;
-        }
-        else
-        {
-            printf("[SUCCESS] All benchmarks completed successfully\n");
-        }
+    print_benchmark_header(benchmarks[i].name);
+
+    // Run the actual benchmark executables
+    char command[256];
+    int result = 0;
+    int skip_benchmark = 0;
+
+    if (i == 0) { // CRC32C
+      snprintf(command, sizeof(command), "./benchmark_crc32c");
+    } else if (i == 1) { // Writer
+      snprintf(command, sizeof(command), "./benchmark_writer");
+    } else if (i == 2) { // Reader
+      snprintf(command, sizeof(command), "./benchmark_reader");
+    } else if (i == 3) { // Compression
+      snprintf(command, sizeof(command), "./benchmark_compress");
+    } else if (i == 4) { // Encryption
+      snprintf(command, sizeof(command), "./benchmark_encrypt");
     }
 
-    return 0;
+    // Check if the benchmark executable exists
+    if (access(command + 2, F_OK) != 0) { // Skip "./" prefix for access check
+      printf("⏭️  %s SKIPPED (executable not found)\n", benchmarks[i].name);
+      skip_benchmark = 1;
+    } else {
+      result = system(command);
+    }
+
+    if (skip_benchmark) {
+      // Already printed skip message, do nothing
+    } else if (result != 0) {
+      printf("%s FAILED\n", benchmarks[i].name);
+      failed = 1;
+    } else {
+      printf("%s COMPLETED\n", benchmarks[i].name);
+    }
+
+    print_benchmark_footer();
+
+    if (!run_all) {
+      break;
+    }
+
+    // Small delay between benchmarks to let system settle
+    sleep(1);
+  }
+
+  if (run_all) {
+    printf("=== Benchmark Summary ===\n");
+    if (failed) {
+      printf("[FAILED] Some benchmarks failed\n");
+      return 1;
+    } else {
+      printf("[SUCCESS] All benchmarks completed successfully\n");
+    }
+  }
+
+  return 0;
 }
