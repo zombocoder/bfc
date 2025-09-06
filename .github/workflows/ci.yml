@@ -111,7 +111,7 @@ jobs:
           mkdir -p extract_encrypted
           cd extract_encrypted
           ../build/bin/bfc extract -p testpassword123 ../test_encrypted.bfc
-          
+
           # Verify extracted files from encrypted container
           [ -f hello.txt ] && echo "hello.txt extracted from encrypted container"
           [ -f bye.txt ] && echo "bye.txt extracted from encrypted container"
@@ -131,7 +131,7 @@ jobs:
           echo -n "0123456789abcdef0123456789abcdef" > test.key
           ./build/bin/bfc create -k test.key test_keyfile.bfc test_data/
           ./build/bin/bfc info test_keyfile.bfc | grep -i encrypt
-          
+
           mkdir -p extract_keyfile
           cd extract_keyfile
           ../build/bin/bfc extract -K ../test.key ../test_keyfile.bfc
@@ -220,7 +220,6 @@ jobs:
             --rc branch_coverage=1 \
             --ignore-errors deprecated,unsupported,unused
           lcov --remove coverage.info \
-            '/usr/*' \
             '*/tests/*' \
             --output-file coverage_filtered.info \
             --rc branch_coverage=1 \
