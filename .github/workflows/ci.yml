@@ -80,13 +80,13 @@ jobs:
 
           # Test compression functionality
           ./build/bin/bfc create -c zstd test_compressed.bfc test_data/
-          ./build/bin/bfc info test_compressed.bfc hello.txt
+          ./build/bin/bfc info test_compressed.bfc test_data/hello.txt
           ./build/bin/bfc verify test_compressed.bfc
 
           # Test different compression levels
           ./build/bin/bfc create -c zstd -l 1 test_fast.bfc test_data/
           ./build/bin/bfc create -c zstd -l 6 test_balanced.bfc test_data/
-          ./build/bin/bfc info test_balanced.bfc hello.txt
+          ./build/bin/bfc info test_balanced.bfc test_data/hello.txt
 
           # Test extraction
           mkdir -p extract_test
@@ -105,7 +105,7 @@ jobs:
           echo "Testing encryption features..."
           ./build/bin/bfc create -e testpassword123 test_encrypted.bfc test_data/
           ./build/bin/bfc info test_encrypted.bfc
-          ./build/bin/bfc info test_encrypted.bfc hello.txt | grep -i encrypt
+          ./build/bin/bfc info test_encrypted.bfc test_data/hello.txt | grep -i encrypt
 
           # Test encrypted extraction
           mkdir -p extract_encrypted
