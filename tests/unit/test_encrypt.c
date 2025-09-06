@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include "bfc_encrypt.h"
 #include "bfc_os.h"
 #include <assert.h>
