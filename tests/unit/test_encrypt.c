@@ -303,7 +303,7 @@ static int test_end_to_end_encryption(void) {
 #ifdef BFC_WITH_SODIUM
   // Use process ID to make filenames unique even across different test runs
   char container_filename[256];
-  char test_filename[256]; 
+  char test_filename[256];
   char extract_filename[256];
   int pid = getpid();
   snprintf(container_filename, sizeof(container_filename), "/tmp/encrypt_e2e_%d.bfc", pid);
@@ -439,7 +439,7 @@ static int test_end_to_end_encryption(void) {
 // Test encryption with compression
 static int test_encryption_with_compression(void) {
 #ifdef BFC_WITH_SODIUM
-  // Use process ID to make filenames unique even across different test runs  
+  // Use process ID to make filenames unique even across different test runs
   char container_filename[256];
   char test_filename[256];
   char extract_filename[256];

@@ -231,12 +231,12 @@ static void show_container_info(bfc_t* reader, const char* container_file, int s
 
   // Check for encryption
   int has_encryption = bfc_has_encryption(reader);
-  
+
   printf("Summary:\n");
   printf("  Total entries: %d\n", ctx.total_entries);
   printf("  Files: %d\n", ctx.total_files);
   printf("  Directories: %d\n", ctx.total_dirs);
-  
+
   if (has_encryption) {
     printf("  Encryption: ChaCha20-Poly1305\n");
   }
