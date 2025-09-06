@@ -480,9 +480,9 @@ static int run_demo(void) {
         unlink("/tmp/test_decrypt");
 
         if (result != BFC_OK) {
-          printf("✓ Correctly failed with wrong password: %d\n", result);
+          printf("Correctly failed with wrong password: %d\n", result);
         } else {
-          printf("✗ WARNING: Decryption succeeded with wrong password!\n");
+          printf("WARNING: Decryption succeeded with wrong password!\n");
         }
       }
     }
