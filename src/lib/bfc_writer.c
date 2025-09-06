@@ -800,8 +800,15 @@ int bfc_set_encryption_key(bfc_t* w, const uint8_t key[32]) {
   // Clear previous key and salt
   memset(w->encryption_key, 0, sizeof(w->encryption_key));
   memset(w->encryption_salt, 0, sizeof(w->encryption_salt));
+  bfc_encrypt_key_clear(&w->master_key);
 
-  // Store key directly
+  // Create master encryption key structure from raw key
+  int result = bfc_encrypt_key_from_bytes(key, &w->master_key);
+  if (result != BFC_OK) {
+    return result;
+  }
+
+  // Store key for encryption operations
   memcpy(w->encryption_key, key, 32);
 
   w->encryption_type = BFC_ENC_CHACHA20_POLY1305;

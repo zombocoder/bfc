@@ -141,8 +141,8 @@ jobs:
 
           # Test encryption with compression
           ./build/bin/bfc create -e testpass -c zstd test_enc_comp.bfc test_data/
-          ./build/bin/bfc info test_enc_comp.bfc hello.txt | grep -i encrypt
-          ./build/bin/bfc info test_enc_comp.bfc hello.txt | grep -i zstd
+          ./build/bin/bfc info test_enc_comp.bfc test_data/hello.txt | grep -i encrypt
+          ./build/bin/bfc info test_enc_comp.bfc test_data/hello.txt | grep -i zstd
 
           # Clean up
           rm -rf test.bfc test_data test_compressed.bfc test_fast.bfc test_balanced.bfc
