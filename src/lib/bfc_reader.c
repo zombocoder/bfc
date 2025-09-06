@@ -476,9 +476,8 @@ static size_t read_compressed_file(bfc_t* r, bfc_reader_entry_t* entry, uint64_t
 
     // Decrypt the data
     // Note: Don't validate expected size since we expect compressed data size, not original size
-    bfc_decrypt_result_t decrypt_result =
-        bfc_decrypt_data(&decrypt_key, raw_data, obj_hdr.enc_size, entry->path, strlen(entry->path),
-                         0);
+    bfc_decrypt_result_t decrypt_result = bfc_decrypt_data(&decrypt_key, raw_data, obj_hdr.enc_size,
+                                                           entry->path, strlen(entry->path), 0);
     bfc_encrypt_key_clear(&decrypt_key);
 
     if (decrypt_result.error != BFC_OK) {
@@ -684,9 +683,8 @@ int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd) {
 
       // Decrypt the data
       // Note: Don't validate expected size since we expect compressed data size, not original size
-      bfc_decrypt_result_t decrypt_result =
-          bfc_decrypt_data(&decrypt_key, compressed_data, obj_hdr.enc_size, entry->path,
-                           strlen(entry->path), 0);
+      bfc_decrypt_result_t decrypt_result = bfc_decrypt_data(
+          &decrypt_key, compressed_data, obj_hdr.enc_size, entry->path, strlen(entry->path), 0);
       bfc_encrypt_key_clear(&decrypt_key);
 
       if (decrypt_result.error != BFC_OK) {
@@ -766,9 +764,8 @@ int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd) {
       }
 
       // Decrypt the data
-      bfc_decrypt_result_t decrypt_result =
-          bfc_decrypt_data(&decrypt_key, encrypted_data, obj_hdr.enc_size, entry->path,
-                           strlen(entry->path), obj_hdr.orig_size);
+      bfc_decrypt_result_t decrypt_result = bfc_decrypt_data(
+          &decrypt_key, encrypted_data, obj_hdr.enc_size, entry->path, strlen(entry->path), 0);
       bfc_encrypt_key_clear(&decrypt_key);
       free(encrypted_data);
 
