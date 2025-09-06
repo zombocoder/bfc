@@ -432,7 +432,9 @@ static int run_demo(void) {
   unlink("sensitive_data.txt");
   unlink("config.dat");
   unlink("large_log.txt");
-  system("rm -rf extracted");
+  if (system("rm -rf extracted") != 0) {
+    // Ignore cleanup errors, but silence the warning
+  }
 
   // Step 1: Create sample files
   printf("Step 1: Creating sample files with sensitive data...\n");
