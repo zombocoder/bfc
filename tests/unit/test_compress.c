@@ -524,6 +524,225 @@ static int test_compression_threshold_settings(void) {
   return 0;
 }
 
+// Test ZSTD streaming context operations (covers lines 328-353)
+static int test_zstd_streaming_context(void) {
+#ifdef BFC_WITH_ZSTD
+  bfc_compress_ctx_t* ctx = bfc_compress_ctx_create(BFC_COMP_ZSTD, 5);
+  assert(ctx != NULL);
+
+  const char* input = "streaming test data that will be processed through ZSTD context";
+  char output[1024];
+  size_t bytes_consumed, bytes_produced;
+
+  // Test different flush modes
+  int result = bfc_compress_ctx_process(ctx, input, strlen(input), output, sizeof(output),
+                                        &bytes_consumed, &bytes_produced, 0); // ZSTD_e_continue
+  assert(result == BFC_OK);
+
+  result = bfc_compress_ctx_process(ctx, input, strlen(input), output, sizeof(output),
+                                   &bytes_consumed, &bytes_produced, 1); // ZSTD_e_flush
+  assert(result == BFC_OK);
+
+  result = bfc_compress_ctx_process(ctx, NULL, 0, output, sizeof(output),
+                                   &bytes_consumed, &bytes_produced, 2); // ZSTD_e_end
+  assert(result == BFC_OK);
+
+  // Test invalid flush mode (covers line 343)
+  result = bfc_compress_ctx_process(ctx, input, strlen(input), output, sizeof(output),
+                                   &bytes_consumed, &bytes_produced, 99);
+  assert(result == BFC_E_INVAL);
+
+  bfc_compress_ctx_destroy(ctx);
+#endif
+  return 0;
+}
+
+// Test large file compression recommendation (covers lines 103-105)
+static int test_large_file_compression_recommendation(void) {
+  // Test file larger than 1024 bytes with no sample data
+  uint8_t comp = bfc_compress_recommend(2048, NULL, 0);
+#ifdef BFC_WITH_ZSTD
+  assert(comp == BFC_COMP_ZSTD);
+#else
+  assert(comp == BFC_COMP_NONE);
+#endif
+
+  // Test with random-looking data that shouldn't compress well
+  char random_data[512];
+  for (size_t i = 0; i < sizeof(random_data); i++) {
+    random_data[i] = (char)(i & 0xFF); // Non-repeating pattern
+  }
+  comp = bfc_compress_recommend(2048, random_data, sizeof(random_data));
+#ifdef BFC_WITH_ZSTD
+  assert(comp == BFC_COMP_ZSTD); // Large files get compressed regardless
+#else
+  assert(comp == BFC_COMP_NONE);
+#endif
+
+  return 0;
+}
+
+// Test compression level adjustments (covers lines 146, 148)
+static int test_compression_level_adjustments(void) {
+#ifdef BFC_WITH_ZSTD
+  const char* test_data = "test data for level adjustments";
+  
+  // Test with level <= 0 (should use default level 3)
+  bfc_compress_result_t result = bfc_compress_data(BFC_COMP_ZSTD, test_data, strlen(test_data), 0);
+  assert(result.error == BFC_OK);
+  free(result.data);
+
+  result = bfc_compress_data(BFC_COMP_ZSTD, test_data, strlen(test_data), -5);
+  assert(result.error == BFC_OK);
+  free(result.data);
+
+  // Test with level > max (should clamp to max)
+  result = bfc_compress_data(BFC_COMP_ZSTD, test_data, strlen(test_data), 999);
+  assert(result.error == BFC_OK);
+  free(result.data);
+#endif
+  return 0;
+}
+
+// Test decompression without expected size (covers lines 223-229)
+static int test_decompression_without_expected_size(void) {
+#ifdef BFC_WITH_ZSTD
+  const char* test_data = "test data for decompression without expected size";
+  
+  // First compress the data
+  bfc_compress_result_t comp_result = bfc_compress_data(BFC_COMP_ZSTD, test_data, strlen(test_data), 3);
+  assert(comp_result.error == BFC_OK);
+  
+  // Now decompress without providing expected size (expected_size = 0)
+  bfc_decompress_result_t decomp_result = 
+      bfc_decompress_data(BFC_COMP_ZSTD, comp_result.data, comp_result.compressed_size, 0);
+  assert(decomp_result.error == BFC_OK);
+  assert(decomp_result.decompressed_size == strlen(test_data));
+  assert(memcmp(decomp_result.data, test_data, strlen(test_data)) == 0);
+  
+  free(comp_result.data);
+  free(decomp_result.data);
+#endif
+  return 0;
+}
+
+// Test expected size mismatch (covers lines 247-252)
+static int test_expected_size_mismatch(void) {
+#ifdef BFC_WITH_ZSTD
+  const char* test_data = "test data for size mismatch testing";
+  
+  // First compress the data
+  bfc_compress_result_t comp_result = bfc_compress_data(BFC_COMP_ZSTD, test_data, strlen(test_data), 3);
+  assert(comp_result.error == BFC_OK);
+  
+  // Try to decompress with wrong expected size
+  bfc_decompress_result_t decomp_result = 
+      bfc_decompress_data(BFC_COMP_ZSTD, comp_result.data, comp_result.compressed_size, strlen(test_data) + 10);
+  assert(decomp_result.error == BFC_E_CRC);
+  assert(decomp_result.data == NULL);
+  
+  free(comp_result.data);
+#endif
+  return 0;
+}
+
+// Test context processing with invalid parameters (covers line 303)
+static int test_context_invalid_parameters(void) {
+  bfc_compress_ctx_t* ctx = bfc_compress_ctx_create(BFC_COMP_NONE, 0);
+  assert(ctx != NULL);
+  
+  const char* input = "test";
+  char output[100];
+  size_t bytes_consumed, bytes_produced;
+  
+  // Test with NULL context
+  int result = bfc_compress_ctx_process(NULL, input, strlen(input), output, sizeof(output),
+                                       &bytes_consumed, &bytes_produced, 0);
+  assert(result == BFC_E_INVAL);
+  
+  // Test with NULL bytes_consumed
+  result = bfc_compress_ctx_process(ctx, input, strlen(input), output, sizeof(output),
+                                   NULL, &bytes_produced, 0);
+  assert(result == BFC_E_INVAL);
+  
+  // Test with NULL bytes_produced  
+  result = bfc_compress_ctx_process(ctx, input, strlen(input), output, sizeof(output),
+                                   &bytes_consumed, NULL, 0);
+  assert(result == BFC_E_INVAL);
+  
+  bfc_compress_ctx_destroy(ctx);
+  return 0;
+}
+
+// Test null context destruction (covers line 364)
+static int test_null_context_destruction(void) {
+  // This should not crash
+  bfc_compress_ctx_destroy(NULL);
+  return 0;
+}
+
+// Test text detection edge cases (covers line 92 tab case)
+static int test_text_detection_edge_cases(void) {
+  // Create text with tabs, newlines, and carriage returns
+  char text_with_tabs[1024];
+  size_t pos = 0;
+  
+  // Add regular text
+  for (int i = 0; i < 200; i++) {
+    text_with_tabs[pos++] = 'A';
+  }
+  
+  // Add tabs
+  for (int i = 0; i < 50; i++) {
+    text_with_tabs[pos++] = '\t';
+  }
+  
+  // Add newlines
+  for (int i = 0; i < 50; i++) {
+    text_with_tabs[pos++] = '\n';
+  }
+  
+  // Add carriage returns
+  for (int i = 0; i < 50; i++) {
+    text_with_tabs[pos++] = '\r';
+  }
+  
+  uint8_t comp = bfc_compress_recommend(pos, text_with_tabs, pos);
+#ifdef BFC_WITH_ZSTD
+  assert(comp == BFC_COMP_ZSTD);
+#else
+  assert(comp == BFC_COMP_NONE);
+#endif
+  
+  return 0;
+}
+
+// Test compression recommendation with mixed printable/non-printable content
+static int test_mixed_content_recommendation(void) {
+  char mixed_data[1024];
+  size_t pos = 0;
+  
+  // 70% printable content (below 80% threshold)
+  for (int i = 0; i < 700; i++) {
+    mixed_data[pos++] = 'A' + (i % 26);
+  }
+  
+  // 30% binary content  
+  for (int i = 0; i < 300; i++) {
+    mixed_data[pos++] = (char)(i & 0xFF);
+  }
+  
+  uint8_t comp = bfc_compress_recommend(pos, mixed_data, pos);
+#ifdef BFC_WITH_ZSTD
+  // Should still recommend compression for large files
+  assert(comp == BFC_COMP_ZSTD);
+#else
+  assert(comp == BFC_COMP_NONE);
+#endif
+  
+  return 0;
+}
+
 int test_compress(void) {
   int result = 0;
 
@@ -537,6 +756,15 @@ int test_compress(void) {
   result += test_end_to_end_compression();
   result += test_compression_edge_cases();
   result += test_compression_threshold_settings();
+  result += test_zstd_streaming_context();
+  result += test_large_file_compression_recommendation();
+  result += test_compression_level_adjustments();
+  result += test_decompression_without_expected_size();
+  result += test_expected_size_mismatch();
+  result += test_context_invalid_parameters();
+  result += test_null_context_destruction();
+  result += test_text_detection_edge_cases();
+  result += test_mixed_content_recommendation();
 
   return result;
 }
