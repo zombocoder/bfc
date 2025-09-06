@@ -294,6 +294,22 @@ static void show_entry_info(bfc_t* reader, const char* path) {
     }
 
     printf("Compression: %s\n", comp_name);
+
+    // Show encryption information
+    const char* enc_name;
+    switch (entry.enc) {
+    case BFC_ENC_NONE:
+      enc_name = "none";
+      break;
+    case BFC_ENC_CHACHA20_POLY1305:
+      enc_name = "ChaCha20-Poly1305";
+      break;
+    default:
+      enc_name = "unknown";
+      break;
+    }
+    printf("Encryption: %s\n", enc_name);
+
     printf("Stored size: %s\n", stored_str);
     printf("Storage ratio: %.1f%%\n", ratio * 100.0);
     if (entry.comp != BFC_COMP_NONE && entry.size > 0) {

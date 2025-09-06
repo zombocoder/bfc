@@ -38,8 +38,13 @@ typedef enum {
 #define BFC_COMP_NONE 0
 #define BFC_COMP_ZSTD 1
 
+// Encryption types
+#define BFC_ENC_NONE 0
+#define BFC_ENC_CHACHA20_POLY1305 1
+
 // Feature flags
 #define BFC_FEATURE_ZSTD (1ULL << 0)
+#define BFC_FEATURE_AEAD (1ULL << 1)
 
 typedef struct bfc bfc_t;
 
@@ -47,8 +52,9 @@ typedef struct {
   const char* path; // UTF-8
   uint32_t mode;    // POSIX bits
   uint64_t mtime_ns;
-  uint32_t comp; // 0
-  uint64_t size; // uncompressed
+  uint32_t comp; // compression type
+  uint32_t enc;  // encryption type
+  uint64_t size; // uncompressed size
   uint32_t crc32c;
   uint64_t obj_offset;
   uint64_t obj_size;
@@ -64,6 +70,17 @@ int bfc_add_dir(bfc_t* w, const char* container_dir, uint32_t mode, uint64_t mti
 int bfc_set_compression(bfc_t* w, uint8_t comp_type, int level);
 int bfc_set_compression_threshold(bfc_t* w, size_t min_bytes);
 uint8_t bfc_get_compression(bfc_t* w);
+
+/* --- Encryption Configuration --- */
+int bfc_set_encryption_password(bfc_t* w, const char* password, size_t password_len);
+int bfc_set_encryption_key(bfc_t* w, const uint8_t key[32]);
+int bfc_clear_encryption(bfc_t* w);
+uint8_t bfc_get_encryption(bfc_t* w);
+int bfc_has_encryption(bfc_t* r);
+
+// Reader-specific encryption functions
+int bfc_reader_set_encryption_password(bfc_t* r, const char* password, size_t password_len);
+int bfc_reader_set_encryption_key(bfc_t* r, const uint8_t key[32]);
 
 int bfc_finish(bfc_t* w); // writes index + footer, fsync
 void bfc_close(bfc_t* w); // closes handle, safe to call after finish

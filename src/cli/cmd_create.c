@@ -24,6 +24,27 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#ifdef BFC_WITH_SODIUM
+// Function to read encryption key from file
+static int read_key_from_file(const char* keyfile, uint8_t key[32]) {
+  FILE* f = fopen(keyfile, "rb");
+  if (!f) {
+    print_error("Cannot open key file '%s': %s", keyfile, strerror(errno));
+    return -1;
+  }
+
+  size_t bytes_read = fread(key, 1, 32, f);
+  fclose(f);
+
+  if (bytes_read != 32) {
+    print_error("Key file '%s' must contain exactly 32 bytes (got %zu)", keyfile, bytes_read);
+    return -1;
+  }
+
+  return 0;
+}
+#endif
+
 typedef struct {
   uint32_t block_size;
   int force;
@@ -34,6 +55,10 @@ typedef struct {
   const char* compression;
   int compression_level;
   size_t compression_threshold;
+  // Encryption options
+  const char* encryption_password;
+  const char* encryption_keyfile;
+  int use_encryption;
 } create_options_t;
 
 static void print_create_help(void) {
@@ -45,13 +70,16 @@ static void print_create_help(void) {
   printf("  -c, --compression TYPE      Compression type: none, zstd, auto (default: none)\n");
   printf("  -l, --compression-level N   Compression level (1-22 for zstd, default: 3)\n");
   printf("  -t, --compression-threshold SIZE  Min file size to compress (default: 64)\n");
+  printf("  -e, --encrypt PASSWORD      Encrypt with password\n");
+  printf("  -k, --keyfile FILE          Encrypt with key from file (32 bytes)\n");
   printf("  -h, --help                  Show this help message\n\n");
   printf("Examples:\n");
   printf("  bfc create archive.bfc /path/to/files/\n");
   printf("  bfc create -f archive.bfc file1.txt file2.txt dir/\n");
   printf("  bfc create -b 8192 archive.bfc /home/user/documents/\n");
   printf("  bfc create -c zstd -l 9 archive.bfc /data/\n");
-  printf("  bfc create -c auto -t 1024 archive.bfc /mixed/content/\n");
+  printf("  bfc create -e mypassword archive.bfc /secure/data/\n");
+  printf("  bfc create -c zstd -e secret -l 6 archive.bfc /compressed-encrypted/\n");
 }
 
 static int parse_create_options(int argc, char* argv[], create_options_t* opts) {
@@ -65,6 +93,10 @@ static int parse_create_options(int argc, char* argv[], create_options_t* opts) 
   opts->compression = "none";
   opts->compression_level = 3;
   opts->compression_threshold = 64;
+  // Encryption defaults
+  opts->encryption_password = NULL;
+  opts->encryption_keyfile = NULL;
+  opts->use_encryption = 0;
 
   int i;
   for (i = 1; i < argc; i++) {
@@ -115,6 +147,20 @@ static int parse_create_options(int argc, char* argv[], create_options_t* opts) 
         print_error("Compression threshold cannot exceed 1MB");
         return -1;
       }
+    } else if (strcmp(argv[i], "-e") == 0 || strcmp(argv[i], "--encrypt") == 0) {
+      if (i + 1 >= argc) {
+        print_error("--encrypt requires a password argument");
+        return -1;
+      }
+      opts->encryption_password = argv[++i];
+      opts->use_encryption = 1;
+    } else if (strcmp(argv[i], "-k") == 0 || strcmp(argv[i], "--keyfile") == 0) {
+      if (i + 1 >= argc) {
+        print_error("--keyfile requires a file path argument");
+        return -1;
+      }
+      opts->encryption_keyfile = argv[++i];
+      opts->use_encryption = 1;
     } else if (argv[i][0] == '-') {
       print_error("Unknown option: %s", argv[i]);
       return -1;
@@ -133,6 +179,12 @@ static int parse_create_options(int argc, char* argv[], create_options_t* opts) 
 
   if (!opts->output_file) {
     print_error("Output container file not specified");
+    return -1;
+  }
+
+  // Validate encryption options
+  if (opts->encryption_password && opts->encryption_keyfile) {
+    print_error("Cannot specify both --encrypt and --keyfile");
     return -1;
   }
 
@@ -288,6 +340,11 @@ int cmd_create(int argc, char* argv[]) {
     comp_type = BFC_COMP_NONE; // Start with none, let writer decide
   }
 
+  // Add encryption feature if encryption is enabled
+  if (opts.use_encryption) {
+    features |= BFC_FEATURE_AEAD;
+  }
+
   bfc_t* writer = NULL;
   result = bfc_create(opts.output_file, opts.block_size, features, &writer);
   if (result != BFC_OK) {
@@ -313,6 +370,46 @@ int cmd_create(int argc, char* argv[]) {
 
     print_verbose("Compression: %s (level: %d, threshold: %zu bytes)", opts.compression,
                   opts.compression_level, opts.compression_threshold);
+  }
+
+  // Configure encryption settings
+  if (opts.use_encryption) {
+#ifndef BFC_WITH_SODIUM
+    print_error("Encryption support not available. Rebuild with -DBFC_WITH_SODIUM=ON");
+    bfc_close(writer);
+    return 1;
+#else
+    if (opts.encryption_password) {
+      // Use password-based encryption
+      result = bfc_set_encryption_password(writer, opts.encryption_password,
+                                           strlen(opts.encryption_password));
+      if (result != BFC_OK) {
+        print_error("Failed to set encryption password: %s", bfc_error_string(result));
+        bfc_close(writer);
+        return 1;
+      }
+      print_verbose("Encryption: ChaCha20-Poly1305 with password-based key derivation");
+    } else if (opts.encryption_keyfile) {
+      // Use key file
+      uint8_t key[32];
+      if (read_key_from_file(opts.encryption_keyfile, key) != 0) {
+        bfc_close(writer);
+        return 1;
+      }
+
+      result = bfc_set_encryption_key(writer, key);
+
+      // Clear key from memory
+      memset(key, 0, sizeof(key));
+
+      if (result != BFC_OK) {
+        print_error("Failed to set encryption key: %s", bfc_error_string(result));
+        bfc_close(writer);
+        return 1;
+      }
+      print_verbose("Encryption: ChaCha20-Poly1305 with key from file");
+    }
+#endif
   }
 
   // Add input paths
