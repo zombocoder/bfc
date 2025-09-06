@@ -301,9 +301,9 @@ static int test_writer_encryption_settings(void) {
 // Test end-to-end encryption with BFC container
 static int test_end_to_end_encryption(void) {
 #ifdef BFC_WITH_SODIUM
-  const char* container_filename = "test_e2e_encryption.bfc";
-  const char* test_filename = "test_e2e_input_enc.txt";
-  const char* extract_filename = "test_e2e_output_enc.txt";
+  const char* container_filename = "/tmp/encrypt_e2e_encryption.bfc";
+  const char* test_filename = "/tmp/encrypt_e2e_input_enc.txt";
+  const char* extract_filename = "/tmp/encrypt_e2e_output_enc.txt";
 
   // Clean up any existing files
   unlink(container_filename);
@@ -434,9 +434,9 @@ static int test_end_to_end_encryption(void) {
 // Test encryption with compression
 static int test_encryption_with_compression(void) {
 #ifdef BFC_WITH_SODIUM
-  const char* container_filename = "test_encrypt_compress.bfc";
-  const char* test_filename = "test_encrypt_compress_input.txt";
-  const char* extract_filename = "test_encrypt_compress_output.txt";
+  const char* container_filename = "/tmp/encrypt_compress_test.bfc";
+  const char* test_filename = "/tmp/encrypt_compress_input.txt";
+  const char* extract_filename = "/tmp/encrypt_compress_output.txt";
 
   // Clean up any existing files
   unlink(container_filename);
