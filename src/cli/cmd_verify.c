@@ -187,13 +187,13 @@ int cmd_verify(int argc, char* argv[]) {
       if (opts.show_progress && opts.deep_verify) {
         printf("\n");
       }
-      printf("✓ Verification successful\n");
+      printf("Verification successful\n");
       printf("Container is valid and all checksums match\n");
       printf("Verification completed in %.2f seconds\n", elapsed);
     }
     return 0;
   } else {
-    print_error("✗ Verification failed: %s", bfc_error_string(result));
+    print_error("Verification failed: %s", bfc_error_string(result));
 
     // Provide more specific error information
     switch (result) {
