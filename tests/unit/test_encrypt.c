@@ -961,6 +961,234 @@ static int test_encrypt_simple_coverage(void) {
   return 0;
 }
 
+// Test parameter validation in key functions
+static int test_encrypt_parameter_validation(void) {
+#ifdef BFC_WITH_SODIUM
+  bfc_encrypt_key_t key;
+  uint8_t salt[BFC_ENC_SALT_SIZE] = {0};
+
+  // Test NULL password in bfc_encrypt_key_from_password
+  int result = bfc_encrypt_key_from_password(NULL, 10, salt, &key);
+  assert(result == BFC_E_INVAL);
+
+  // Test NULL key in bfc_encrypt_key_from_password
+  result = bfc_encrypt_key_from_password("password", 8, salt, NULL);
+  assert(result == BFC_E_INVAL);
+
+  // Test NULL key in bfc_encrypt_key_from_bytes
+  uint8_t raw_key[BFC_ENC_KEY_SIZE] = {0};
+  result = bfc_encrypt_key_from_bytes(raw_key, NULL);
+  assert(result == BFC_E_INVAL);
+
+  // Test NULL raw_key in bfc_encrypt_key_from_bytes
+  result = bfc_encrypt_key_from_bytes(NULL, &key);
+  assert(result == BFC_E_INVAL);
+
+  // Test NULL salt in bfc_encrypt_generate_salt
+  result = bfc_encrypt_generate_salt(NULL);
+  assert(result == BFC_E_INVAL);
+#endif
+  return 0;
+}
+
+// Test encryption data function parameter validation
+static int test_encrypt_data_parameter_validation(void) {
+#ifdef BFC_WITH_SODIUM
+  bfc_encrypt_key_t key;
+  const char* password = "testpass";
+  uint8_t salt[BFC_ENC_SALT_SIZE] = {0};
+  int result = bfc_encrypt_key_from_password(password, strlen(password), salt, &key);
+  assert(result == BFC_OK);
+
+  const char* test_data = "test";
+  const char* path = "test/path";
+
+  // Test NULL key in bfc_encrypt_data
+  bfc_encrypt_result_t enc_result =
+      bfc_encrypt_data(NULL, test_data, strlen(test_data), path, strlen(path));
+  assert(enc_result.error == BFC_E_INVAL);
+  assert(enc_result.data == NULL);
+
+  // Test NULL input in bfc_encrypt_data
+  enc_result = bfc_encrypt_data(&key, NULL, 10, path, strlen(path));
+  assert(enc_result.error == BFC_E_INVAL);
+  assert(enc_result.data == NULL);
+
+  // Test zero input_size in bfc_encrypt_data - this should actually succeed
+  enc_result = bfc_encrypt_data(&key, test_data, 0, path, strlen(path));
+  assert(enc_result.error == BFC_OK); // Zero-length encryption is allowed
+  free(enc_result.data);
+
+  // Test similar for decrypt function
+  bfc_decrypt_result_t dec_result =
+      bfc_decrypt_data(NULL, test_data, strlen(test_data), path, strlen(path), 100);
+  assert(dec_result.error == BFC_E_INVAL);
+  assert(dec_result.data == NULL);
+
+  dec_result = bfc_decrypt_data(&key, NULL, 10, path, strlen(path), 100);
+  assert(dec_result.error == BFC_E_INVAL);
+  assert(dec_result.data == NULL);
+
+  // Test zero input_size in bfc_decrypt_data - this might also be allowed
+  dec_result = bfc_decrypt_data(&key, test_data, 0, path, strlen(path), 100);
+  // Don't assert specific error - it depends on implementation
+
+  bfc_encrypt_key_clear(&key);
+#endif
+  return 0;
+}
+
+// Test encryption context parameter validation
+static int test_encrypt_context_parameter_validation(void) {
+#ifdef BFC_WITH_SODIUM
+  bfc_encrypt_key_t key;
+  const char* password = "testpass";
+  uint8_t salt[BFC_ENC_SALT_SIZE] = {0};
+  int result = bfc_encrypt_key_from_password(password, strlen(password), salt, &key);
+  assert(result == BFC_OK);
+
+  const char* path = "test/path";
+
+  // Test NULL key in bfc_encrypt_ctx_create
+  bfc_encrypt_ctx_t* ctx = bfc_encrypt_ctx_create(NULL, path, strlen(path));
+  assert(ctx == NULL);
+
+  bfc_encrypt_key_clear(&key);
+#endif
+  return 0;
+}
+
+// Test context utility functions
+static int test_encrypt_context_utilities(void) {
+#ifdef BFC_WITH_SODIUM
+  bfc_encrypt_key_t key;
+  const char* password = "testpass";
+  uint8_t salt[BFC_ENC_SALT_SIZE] = {0};
+  int result = bfc_encrypt_key_from_password(password, strlen(password), salt, &key);
+  assert(result == BFC_OK);
+
+  const char* path = "test/path";
+
+  // Test creating context with valid parameters
+  bfc_encrypt_ctx_t* ctx = bfc_encrypt_ctx_create(&key, path, strlen(path));
+  assert(ctx != NULL);
+
+  // Test getting nonce from context
+  uint8_t nonce[BFC_ENC_NONCE_SIZE];
+  result = bfc_encrypt_ctx_get_nonce(ctx, nonce);
+  // This might fail if not initialized, which is expected
+
+  // Test destroying context
+  bfc_encrypt_ctx_destroy(ctx);
+
+  // Test destroying NULL context (should not crash)
+  bfc_encrypt_ctx_destroy(NULL);
+
+  bfc_encrypt_key_clear(&key);
+#endif
+  return 0;
+}
+
+// Test cryptographic edge cases
+static int test_encrypt_crypto_edge_cases(void) {
+#ifdef BFC_WITH_SODIUM
+  bfc_encrypt_key_t key;
+  const char* password = "testpass";
+  uint8_t salt[BFC_ENC_SALT_SIZE] = {0};
+  int result = bfc_encrypt_key_from_password(password, strlen(password), salt, &key);
+  assert(result == BFC_OK);
+
+  // Test encryption with empty associated data
+  const char* test_data = "test data";
+  bfc_encrypt_result_t enc_result = bfc_encrypt_data(&key, test_data, strlen(test_data), NULL, 0);
+  assert(enc_result.error == BFC_OK);
+  assert(enc_result.data != NULL);
+
+  // Test decryption with empty associated data
+  bfc_decrypt_result_t dec_result = bfc_decrypt_data(
+      &key, enc_result.data, enc_result.encrypted_size, NULL, 0, strlen(test_data));
+  assert(dec_result.error == BFC_OK);
+  assert(dec_result.decrypted_size == strlen(test_data));
+  assert(memcmp(dec_result.data, test_data, strlen(test_data)) == 0);
+
+  free(enc_result.data);
+  free(dec_result.data);
+
+  // Test with very long associated data
+  char long_path[1000];
+  memset(long_path, 'A', sizeof(long_path) - 1);
+  long_path[sizeof(long_path) - 1] = '\0';
+
+  enc_result = bfc_encrypt_data(&key, test_data, strlen(test_data), long_path, strlen(long_path));
+  assert(enc_result.error == BFC_OK);
+  assert(enc_result.data != NULL);
+
+  dec_result = bfc_decrypt_data(&key, enc_result.data, enc_result.encrypted_size, long_path,
+                                strlen(long_path), strlen(test_data));
+  assert(dec_result.error == BFC_OK);
+  assert(dec_result.decrypted_size == strlen(test_data));
+  assert(memcmp(dec_result.data, test_data, strlen(test_data)) == 0);
+
+  free(enc_result.data);
+  free(dec_result.data);
+
+  bfc_encrypt_key_clear(&key);
+#endif
+  return 0;
+}
+
+// Test corrupted ciphertext handling
+static int test_encrypt_corruption_handling(void) {
+#ifdef BFC_WITH_SODIUM
+  bfc_encrypt_key_t key;
+  const char* password = "testpass";
+  uint8_t salt[BFC_ENC_SALT_SIZE] = {0};
+  int result = bfc_encrypt_key_from_password(password, strlen(password), salt, &key);
+  assert(result == BFC_OK);
+
+  const char* test_data = "test data for corruption test";
+  const char* path = "test/file/path";
+
+  // First encrypt normally
+  bfc_encrypt_result_t enc_result =
+      bfc_encrypt_data(&key, test_data, strlen(test_data), path, strlen(path));
+  assert(enc_result.error == BFC_OK);
+  assert(enc_result.data != NULL);
+
+  // Test with corrupted ciphertext - flip a bit in the middle
+  if (enc_result.encrypted_size > 32) {
+    uint8_t* corrupted = malloc(enc_result.encrypted_size);
+    memcpy(corrupted, enc_result.data, enc_result.encrypted_size);
+    corrupted[enc_result.encrypted_size / 2] ^= 0x01; // Flip a bit
+
+    bfc_decrypt_result_t dec_result = bfc_decrypt_data(&key, corrupted, enc_result.encrypted_size,
+                                                       path, strlen(path), strlen(test_data));
+    assert(dec_result.error != BFC_OK); // Should fail authentication
+    assert(dec_result.data == NULL);
+
+    free(corrupted);
+  }
+
+  // Test with wrong path (different associated data)
+  bfc_decrypt_result_t dec_result = bfc_decrypt_data(
+      &key, enc_result.data, enc_result.encrypted_size, "wrong/path", 10, strlen(test_data));
+  assert(dec_result.error != BFC_OK); // Should fail authentication
+  assert(dec_result.data == NULL);
+
+  // Test with truncated ciphertext
+  if (enc_result.encrypted_size > 16) {
+    dec_result = bfc_decrypt_data(&key, enc_result.data, enc_result.encrypted_size - 10, path,
+                                  strlen(path), strlen(test_data));
+    assert(dec_result.error != BFC_OK); // Should fail
+    assert(dec_result.data == NULL);
+  }
+
+  free(enc_result.data);
+  bfc_encrypt_key_clear(&key);
+#endif
+  return 0;
+}
+
 int test_encrypt(void) {
   int result = 0;
 
@@ -979,6 +1207,12 @@ int test_encrypt(void) {
   result += test_additional_encryption_coverage();
   result += test_encryption_key_edge_cases();
   result += test_encrypt_simple_coverage();
+  result += test_encrypt_parameter_validation();
+  result += test_encrypt_data_parameter_validation();
+  result += test_encrypt_context_parameter_validation();
+  result += test_encrypt_context_utilities();
+  result += test_encrypt_crypto_edge_cases();
+  result += test_encrypt_corruption_handling();
 
   return result;
 }
