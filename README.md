@@ -96,20 +96,56 @@ cmake --build build --target coverage
 
 ## CLI Usage
 
+### Global Options
+
+All commands support these global options:
+
+```bash
+-v, --verbose      Enable verbose output showing detailed operations
+-q, --quiet        Suppress non-error output (only show errors)
+-h, --help         Show help message for the command
+--version          Show version information
+```
+
 ### Creating containers
 
+The `create` command builds new BFC containers from files and directories.
+
+**Syntax:** `bfc create [options] <container.bfc> <input-paths...>`
+
+**Options:**
+- `-b, --block-size SIZE` - Set container block size (default: 4096 bytes)
+- `-f, --force` - Overwrite existing container file
+- `-c, --compression TYPE` - Compression: `none`, `zstd`, `auto` (default: none)
+- `-l, --compression-level N` - Compression level for ZSTD (1-22, default: 3)
+- `-t, --compression-threshold SIZE` - Minimum file size to compress (default: 64 bytes)
+- `-e, --encrypt PASSWORD` - Encrypt files with password (requires libsodium)
+- `-k, --keyfile FILE` - Encrypt with 32-byte key from file (requires libsodium)
+
+**Examples:**
 ```bash
 # Create from directory
 bfc create documents.bfc ~/Documents/
 
-# Create from multiple sources
+# Create from multiple sources  
 bfc create backup.bfc file1.txt file2.txt ~/Pictures/ ~/Music/
 
-# Custom block size (default: 4096)
+# Custom block size (for performance tuning)
 bfc create -b 8192 archive.bfc /data/
 
 # Force overwrite existing container
 bfc create -f archive.bfc /path/to/files/
+
+# Create with compression
+bfc create -c zstd archive.bfc /data/
+bfc create -c zstd -l 9 archive.bfc /data/  # Maximum compression
+
+# Create with encryption
+bfc create -e mypassword secure.bfc /sensitive/data/
+bfc create -k secret.key secure.bfc /sensitive/data/
+
+# Combined compression and encryption
+bfc create -c zstd -e secret -l 6 archive.bfc /data/
 ```
 
 ### Compression support
@@ -193,62 +229,118 @@ bfc info secure.bfc path/to/file.txt
 
 ### Listing contents
 
+The `list` command displays container contents with various formatting options.
+
+**Syntax:** `bfc list [options] <container.bfc> [path]`
+
+**Options:**
+- `-l, --long` - Use long listing format (like `ls -l`) showing permissions, size, date
+- `-s, --size` - Show file sizes in human-readable format  
+- `-c, --checksum` - Show CRC32C checksums for integrity verification
+- Combine options: `-sc` shows both sizes and checksums
+
+**Examples:**
 ```bash
-# Simple listing
+# Simple listing (names only)
 bfc list archive.bfc
 
-# Long format (like ls -l)
+# Long format with permissions, size, and timestamps
 bfc list -l archive.bfc
 
 # Show file sizes and checksums
 bfc list -sc archive.bfc
 
-# Filter by path prefix
+# Filter by path prefix or directory
 bfc list archive.bfc docs/
+bfc list archive.bfc docs/readme.txt
+
+# Combined: long format with sizes and checksums
+bfc list -lsc archive.bfc
 ```
 
 ### Extracting files
 
+The `extract` command extracts files and directories from containers.
+
+**Syntax:** `bfc extract [options] <container.bfc> [paths...]`
+
+**Options:**
+- `-C, --directory DIR` - Extract to specific directory (changes to DIR before extracting)
+- `-f, --force` - Overwrite existing files without prompting
+- `-k, --keep-paths` - Preserve full directory structure (default: flatten to basenames)
+- `-p, --password PASS` - Provide password for encrypted containers
+- `-K, --keyfile FILE` - Use key file for encrypted containers (32 bytes)
+
+**Examples:**
 ```bash
-# Extract all files to current directory
+# Extract all files to current directory (flattened)
 bfc extract archive.bfc
 
 # Extract to specific directory
-bfc extract -C /tmp archive.bfc
+bfc extract -C /tmp/extracted archive.bfc
 
-# Extract specific files/directories
-bfc extract archive.bfc docs/ README.txt
-
-# Preserve full directory paths
+# Extract preserving directory structure
 bfc extract -k archive.bfc
+
+# Extract specific files/directories only
+bfc extract archive.bfc docs/ README.txt
 
 # Force overwrite existing files
 bfc extract -f archive.bfc
+
+# Extract encrypted container with password
+bfc extract -p mypassword secure.bfc
+
+# Extract encrypted container with key file  
+bfc extract -K secret.key secure.bfc
+
+# Combined: extract to directory, preserve paths, force overwrite
+bfc extract -kf -C /tmp/output archive.bfc
 ```
 
 ### Container information
 
+The `info` command displays detailed information about containers and individual files.
+
+**Syntax:** `bfc info [options] <container.bfc> [path]`
+
+**Options:**
+- `-d, --detailed` - Show detailed information including compression ratios, encryption status
+
+**Examples:**
 ```bash
-# Basic container info
+# Basic container summary
 bfc info archive.bfc
 
-# Detailed listing with metadata
+# Detailed container information
 bfc info -d archive.bfc
 
 # Information about specific file
 bfc info archive.bfc path/to/file.txt
+
+# Detailed info about specific file (shows compression, encryption)
+bfc info -d archive.bfc path/to/file.txt
 ```
 
 ### Verifying integrity
 
+The `verify` command checks container and file integrity.
+
+**Syntax:** `bfc verify [options] <container.bfc>`
+
+**Options:**
+- `--deep` - Perform deep verification (read and verify all file contents, slower but thorough)
+- `-p, --progress` - Show progress bar during verification (useful for large containers)
+
+**Examples:**
 ```bash
-# Quick structural verification
+# Quick structural verification (fast)
 bfc verify archive.bfc
 
-# Deep verification (check all file contents)
+# Deep verification checking all file contents (slower but complete)
 bfc verify --deep archive.bfc
 
-# Show progress for large containers
+# Deep verification with progress indicator
 bfc verify -p --deep archive.bfc
 ```
 
@@ -306,6 +398,87 @@ bfc_close_read(reader);
 ```
 
 See the [examples/](examples/) directory for complete examples.
+
+## CLI Reference
+
+### Quick Reference
+
+**Global Options** (available for all commands):
+```
+-v, --verbose      Enable verbose output
+-q, --quiet        Suppress non-error output  
+-h, --help         Show help message
+--version          Show version information
+```
+
+**Commands Summary:**
+
+| Command | Purpose | Key Options |
+|---------|---------|-------------|
+| `create` | Build new container | `-c` (compression), `-e` (encrypt), `-f` (force) |
+| `list` | Show contents | `-l` (long format), `-s` (sizes), `-c` (checksums) |
+| `extract` | Extract files | `-C` (directory), `-k` (keep paths), `-p` (password) |
+| `info` | Container info | `-d` (detailed) |
+| `verify` | Check integrity | `--deep` (full check), `-p` (progress) |
+
+### Complete Option Reference
+
+**`bfc create [options] <container.bfc> <input-paths...>`**
+```
+-b, --block-size SIZE       Block size (default: 4096)
+-f, --force                 Overwrite existing container
+-c, --compression TYPE      none|zstd|auto (default: none)
+-l, --compression-level N   ZSTD level 1-22 (default: 3)
+-t, --compression-threshold SIZE  Min size to compress (default: 64)
+-e, --encrypt PASSWORD      Encrypt with password
+-k, --keyfile FILE          Encrypt with key file (32 bytes)
+```
+
+**`bfc list [options] <container.bfc> [path]`**
+```
+-l, --long         Long format (permissions, size, date)
+-s, --size         Show file sizes
+-c, --checksum     Show CRC32C checksums
+```
+
+**`bfc extract [options] <container.bfc> [paths...]`**
+```
+-C, --directory DIR    Extract to specific directory
+-f, --force           Overwrite existing files
+-k, --keep-paths      Preserve directory structure
+-p, --password PASS   Password for encrypted containers
+-K, --keyfile FILE    Key file for encrypted containers
+```
+
+**`bfc info [options] <container.bfc> [path]`**
+```
+-d, --detailed        Show detailed information
+```
+
+**`bfc verify [options] <container.bfc>`**
+```
+--deep                Deep verification (check all content)
+-p, --progress        Show progress indicator
+```
+
+### Common Usage Patterns
+
+```bash
+# Create compressed encrypted archive
+bfc create -c zstd -e password archive.bfc /data/
+
+# List with full details
+bfc list -lsc archive.bfc
+
+# Extract preserving structure to specific location
+bfc extract -k -C /tmp/restored archive.bfc
+
+# Verify with progress
+bfc verify -p --deep archive.bfc
+
+# Get detailed info about specific file
+bfc info -d archive.bfc path/to/file.txt
+```
 
 ## File Format
 
