@@ -382,16 +382,7 @@ int cmd_extract(int argc, char* argv[]) {
     return (result > 0) ? 0 : 1;
   }
 
-  // Change to output directory if specified
-  if (opts.output_dir) {
-    print_verbose("Changing to directory: %s", opts.output_dir);
-    if (chdir(opts.output_dir) != 0) {
-      print_error("Cannot change to directory '%s': %s", opts.output_dir, strerror(errno));
-      return 1;
-    }
-  }
-
-  // Open container for reading
+  // Open container for reading BEFORE changing directories
   print_verbose("Opening container: %s", opts.container_file);
 
   bfc_t* reader = NULL;
@@ -399,6 +390,16 @@ int cmd_extract(int argc, char* argv[]) {
   if (result != BFC_OK) {
     print_error("Failed to open container '%s': %s", opts.container_file, bfc_error_string(result));
     return 1;
+  }
+
+  // Change to output directory if specified (after opening container)
+  if (opts.output_dir) {
+    print_verbose("Changing to directory: %s", opts.output_dir);
+    if (chdir(opts.output_dir) != 0) {
+      print_error("Cannot change to directory '%s': %s", opts.output_dir, strerror(errno));
+      bfc_close_read(reader);
+      return 1;
+    }
   }
 
   // Configure encryption if needed
