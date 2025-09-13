@@ -971,6 +971,289 @@ static int test_read_errors(void) {
   return 0;
 }
 
+// Helper function to create a container with symlinks for testing
+static int create_symlink_test_container(const char* filename) {
+  unlink(filename);
+
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  if (result != BFC_OK)
+    return result;
+
+  // Add a directory
+  result = bfc_add_dir(writer, "testdir", 0755, bfc_os_current_time_ns());
+  if (result != BFC_OK) {
+    bfc_close(writer);
+    return result;
+  }
+
+  // Add a regular file
+  const char* content = "Test file content for symlinks";
+  const char* src_file = "/tmp/reader_test_src_symlink.txt";
+  FILE* src = fopen(src_file, "w");
+  if (!src) {
+    bfc_close(writer);
+    return BFC_E_IO;
+  }
+  fwrite(content, 1, strlen(content), src);
+  fclose(src);
+
+  src = fopen(src_file, "rb");
+  if (!src) {
+    bfc_close(writer);
+    return BFC_E_IO;
+  }
+  uint32_t crc;
+  result = bfc_add_file(writer, "testfile.txt", src, 0644, bfc_os_current_time_ns(), &crc);
+  fclose(src);
+  unlink(src_file);
+
+  if (result != BFC_OK) {
+    bfc_close(writer);
+    return result;
+  }
+
+  // Add various types of symlinks
+  result = bfc_add_symlink(writer, "link_to_file", "testfile.txt", 0755, bfc_os_current_time_ns());
+  if (result != BFC_OK) {
+    bfc_close(writer);
+    return result;
+  }
+
+  result = bfc_add_symlink(writer, "link_to_dir", "testdir", 0755, bfc_os_current_time_ns());
+  if (result != BFC_OK) {
+    bfc_close(writer);
+    return result;
+  }
+
+  result = bfc_add_symlink(writer, "absolute_link", "/tmp/absolute_target", 0755,
+                           bfc_os_current_time_ns());
+  if (result != BFC_OK) {
+    bfc_close(writer);
+    return result;
+  }
+
+  result =
+      bfc_add_symlink(writer, "relative_link", "../parent/target", 0755, bfc_os_current_time_ns());
+  if (result != BFC_OK) {
+    bfc_close(writer);
+    return result;
+  }
+
+  result =
+      bfc_add_symlink(writer, "broken_link", "nonexistent_target", 0755, bfc_os_current_time_ns());
+  if (result != BFC_OK) {
+    bfc_close(writer);
+    return result;
+  }
+
+  result = bfc_finish(writer);
+  if (result != BFC_OK) {
+    bfc_close(writer);
+    return result;
+  }
+
+  bfc_close(writer);
+  return BFC_OK;
+}
+
+// Helper types and callback for symlink listing test
+typedef struct {
+  int total_count;
+  int symlink_count;
+  int file_count;
+  int dir_count;
+} symlink_count_context_t;
+
+static int symlink_list_callback(const bfc_entry_t* entry, void* user) {
+  symlink_count_context_t* c = (symlink_count_context_t*) user;
+  c->total_count++;
+
+  if (S_ISLNK(entry->mode)) {
+    c->symlink_count++;
+  } else if (S_ISREG(entry->mode)) {
+    c->file_count++;
+  } else if (S_ISDIR(entry->mode)) {
+    c->dir_count++;
+  }
+
+  return 0;
+}
+
+static int test_read_symlink_stat(void) {
+  const char* filename = "/tmp/reader_test_symlink_stat.bfc";
+
+  // Create test container
+  int result = create_symlink_test_container(filename);
+  assert(result == BFC_OK);
+
+  // Open for reading
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+  assert(reader != NULL);
+
+  // Test stat on symlinks
+  bfc_entry_t entry;
+
+  // Test simple symlink
+  result = bfc_stat(reader, "link_to_file", &entry);
+  assert(result == BFC_OK);
+  assert(S_ISLNK(entry.mode));
+  assert(entry.size == strlen("testfile.txt"));
+
+  // Test directory symlink
+  result = bfc_stat(reader, "link_to_dir", &entry);
+  assert(result == BFC_OK);
+  assert(S_ISLNK(entry.mode));
+  assert(entry.size == strlen("testdir"));
+
+  // Test absolute symlink
+  result = bfc_stat(reader, "absolute_link", &entry);
+  assert(result == BFC_OK);
+  assert(S_ISLNK(entry.mode));
+  assert(entry.size == strlen("/tmp/absolute_target"));
+
+  // Test relative symlink
+  result = bfc_stat(reader, "relative_link", &entry);
+  assert(result == BFC_OK);
+  assert(S_ISLNK(entry.mode));
+  assert(entry.size == strlen("../parent/target"));
+
+  // Test broken symlink
+  result = bfc_stat(reader, "broken_link", &entry);
+  assert(result == BFC_OK);
+  assert(S_ISLNK(entry.mode));
+  assert(entry.size == strlen("nonexistent_target"));
+
+  bfc_close_read(reader);
+  unlink(filename);
+
+  return 0;
+}
+
+static int test_read_symlink_content(void) {
+  const char* filename = "/tmp/reader_test_symlink_content.bfc";
+
+  // Create test container
+  int result = create_symlink_test_container(filename);
+  assert(result == BFC_OK);
+
+  // Open for reading
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+
+  // Read symlink targets
+  char buffer[256];
+
+  // Test reading simple symlink target
+  size_t bytes_read = bfc_read(reader, "link_to_file", 0, buffer, sizeof(buffer));
+  assert(bytes_read == strlen("testfile.txt"));
+  buffer[bytes_read] = '\0';
+  assert(strcmp(buffer, "testfile.txt") == 0);
+
+  // Test reading directory symlink target
+  memset(buffer, 0, sizeof(buffer));
+  bytes_read = bfc_read(reader, "link_to_dir", 0, buffer, sizeof(buffer));
+  assert(bytes_read == strlen("testdir"));
+  buffer[bytes_read] = '\0';
+  assert(strcmp(buffer, "testdir") == 0);
+
+  // Test reading absolute symlink target
+  memset(buffer, 0, sizeof(buffer));
+  bytes_read = bfc_read(reader, "absolute_link", 0, buffer, sizeof(buffer));
+  assert(bytes_read == strlen("/tmp/absolute_target"));
+  buffer[bytes_read] = '\0';
+  assert(strcmp(buffer, "/tmp/absolute_target") == 0);
+
+  // Test reading relative symlink target
+  memset(buffer, 0, sizeof(buffer));
+  bytes_read = bfc_read(reader, "relative_link", 0, buffer, sizeof(buffer));
+  assert(bytes_read == strlen("../parent/target"));
+  buffer[bytes_read] = '\0';
+  assert(strcmp(buffer, "../parent/target") == 0);
+
+  // Test reading broken symlink target
+  memset(buffer, 0, sizeof(buffer));
+  bytes_read = bfc_read(reader, "broken_link", 0, buffer, sizeof(buffer));
+  assert(bytes_read == strlen("nonexistent_target"));
+  buffer[bytes_read] = '\0';
+  assert(strcmp(buffer, "nonexistent_target") == 0);
+
+  bfc_close_read(reader);
+  unlink(filename);
+
+  return 0;
+}
+
+static int test_symlink_listing(void) {
+  const char* filename = "/tmp/reader_test_symlink_list.bfc";
+
+  // Create test container
+  int result = create_symlink_test_container(filename);
+  assert(result == BFC_OK);
+
+  // Open for reading
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+
+  // Count entries and verify symlinks are listed
+  symlink_count_context_t ctx = {0, 0, 0, 0};
+
+  // List callback to count entries - defined as a static function above
+  result = bfc_list(reader, NULL, symlink_list_callback, &ctx);
+  assert(result == BFC_OK);
+
+  // Verify counts: 1 dir + 1 file + 5 symlinks = 7 total
+  assert(ctx.total_count == 7);
+  assert(ctx.dir_count == 1);
+  assert(ctx.file_count == 1);
+  assert(ctx.symlink_count == 5);
+
+  bfc_close_read(reader);
+  unlink(filename);
+
+  return 0;
+}
+
+static int test_symlink_partial_read(void) {
+  const char* filename = "/tmp/reader_test_symlink_partial.bfc";
+
+  // Create test container
+  int result = create_symlink_test_container(filename);
+  assert(result == BFC_OK);
+
+  // Open for reading
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+
+  // Test partial reads of symlink targets
+  char buffer[20];
+  const char* target = "/tmp/absolute_target";
+  size_t target_len = strlen(target);
+
+  // Read first part of absolute symlink target
+  size_t bytes_read = bfc_read(reader, "absolute_link", 0, buffer, 5);
+  assert(bytes_read == 5);
+  buffer[bytes_read] = '\0';
+  assert(strcmp(buffer, "/tmp/") == 0);
+
+  // Read second part - remaining bytes
+  size_t remaining = target_len - 5;
+  bytes_read = bfc_read(reader, "absolute_link", 5, buffer, remaining);
+  assert(bytes_read == remaining);
+  buffer[bytes_read] = '\0';
+  assert(strcmp(buffer, "absolute_target") == 0);
+
+  bfc_close_read(reader);
+  unlink(filename);
+
+  return 0;
+}
+
 int test_reader(void) {
   if (test_open_container() != 0)
     return 1;
@@ -1013,6 +1296,14 @@ int test_reader(void) {
   if (test_compressed_files() != 0)
     return 1;
   if (test_read_errors() != 0)
+    return 1;
+  if (test_read_symlink_stat() != 0)
+    return 1;
+  if (test_read_symlink_content() != 0)
+    return 1;
+  if (test_symlink_listing() != 0)
+    return 1;
+  if (test_symlink_partial_read() != 0)
     return 1;
 
   return 0;

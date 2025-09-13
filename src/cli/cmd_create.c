@@ -232,7 +232,8 @@ static int add_file_to_container(bfc_t* writer, const char* file_path, const cha
   return 0;
 }
 
-static int add_symlink_to_container(bfc_t* writer, const char* link_path, const char* container_path) {
+static int add_symlink_to_container(bfc_t* writer, const char* link_path,
+                                    const char* container_path) {
   print_verbose("Adding symlink: %s -> %s", link_path, container_path);
 
   // Read the symlink target

@@ -524,7 +524,8 @@ int bfc_add_dir(bfc_t* w, const char* container_dir, uint32_t mode, uint64_t mti
   return result;
 }
 
-int bfc_add_symlink(bfc_t* w, const char* container_path, const char* link_target, uint32_t mode, uint64_t mtime_ns) {
+int bfc_add_symlink(bfc_t* w, const char* container_path, const char* link_target, uint32_t mode,
+                    uint64_t mtime_ns) {
   if (!w || !container_path || !link_target || w->finished) {
     return BFC_E_INVAL;
   }

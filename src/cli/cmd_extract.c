@@ -320,7 +320,8 @@ static int extract_directory(const char* output_path, const bfc_entry_t* entry, 
   return 0;
 }
 
-static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* output_path, int force) {
+static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* output_path,
+                           int force) {
   // Check if file exists
   struct stat st;
   if (lstat(output_path, &st) == 0) {
@@ -368,7 +369,8 @@ static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* 
   };
 
   if (lutimes(output_path, times) != 0) {
-    print_verbose("Warning: cannot set timestamps on symlink '%s': %s", output_path, strerror(errno));
+    print_verbose("Warning: cannot set timestamps on symlink '%s': %s", output_path,
+                  strerror(errno));
   }
 
   if (!g_options.quiet) {
