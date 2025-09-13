@@ -544,6 +544,228 @@ static int test_finish_before_close(void) {
   return 0;
 }
 
+static int test_add_simple_symlink(void) {
+  const char* filename = "/tmp/test_symlink.bfc";
+  const char* target = "target.txt";
+
+  // Clean up
+  unlink(filename);
+
+  // Create container
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Add symlink
+  result = bfc_add_symlink(writer, "link.txt", target, 0755, bfc_os_current_time_ns());
+  assert(result == BFC_OK);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+
+  bfc_close(writer);
+  unlink(filename);
+
+  return 0;
+}
+
+static int test_add_absolute_symlink(void) {
+  const char* filename = "/tmp/test_abs_symlink.bfc";
+  const char* target = "/tmp/absolute_target.txt";
+
+  // Clean up
+  unlink(filename);
+
+  // Create container
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Add absolute symlink
+  result = bfc_add_symlink(writer, "abs_link.txt", target, 0755, bfc_os_current_time_ns());
+  assert(result == BFC_OK);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+
+  bfc_close(writer);
+  unlink(filename);
+
+  return 0;
+}
+
+static int test_add_relative_symlink(void) {
+  const char* filename = "/tmp/test_rel_symlink.bfc";
+  const char* target = "../parent/target.txt";
+
+  // Clean up
+  unlink(filename);
+
+  // Create container
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Add relative symlink
+  result = bfc_add_symlink(writer, "subdir/rel_link.txt", target, 0755, bfc_os_current_time_ns());
+  assert(result == BFC_OK);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+
+  bfc_close(writer);
+  unlink(filename);
+
+  return 0;
+}
+
+static int test_symlink_parameter_validation(void) {
+  const char* filename = "/tmp/test_symlink_validation.bfc";
+
+  // Clean up
+  unlink(filename);
+
+  // Create container
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Test invalid parameters
+  result = bfc_add_symlink(NULL, "link.txt", "target.txt", 0755, bfc_os_current_time_ns());
+  assert(result == BFC_E_INVAL);
+
+  result = bfc_add_symlink(writer, NULL, "target.txt", 0755, bfc_os_current_time_ns());
+  assert(result == BFC_E_INVAL);
+
+  result = bfc_add_symlink(writer, "link.txt", NULL, 0755, bfc_os_current_time_ns());
+  assert(result == BFC_E_INVAL);
+
+  // Valid symlink should work
+  result =
+      bfc_add_symlink(writer, "valid_link.txt", "valid_target.txt", 0755, bfc_os_current_time_ns());
+  assert(result == BFC_OK);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+
+  bfc_close(writer);
+  unlink(filename);
+
+  return 0;
+}
+
+static int test_symlink_duplicate_paths(void) {
+  const char* filename = "/tmp/test_symlink_dup.bfc";
+
+  // Clean up
+  unlink(filename);
+
+  // Create container
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Add symlink
+  result = bfc_add_symlink(writer, "link.txt", "target1.txt", 0755, bfc_os_current_time_ns());
+  assert(result == BFC_OK);
+
+  // Try to add symlink with same path (should fail)
+  result = bfc_add_symlink(writer, "link.txt", "target2.txt", 0755, bfc_os_current_time_ns());
+  assert(result == BFC_E_EXISTS);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+
+  bfc_close(writer);
+  unlink(filename);
+
+  return 0;
+}
+
+static int test_symlink_long_target(void) {
+  const char* filename = "/tmp/test_symlink_long.bfc";
+
+  // Create a long target path
+  char long_target[1024];
+  memset(long_target, 'a', sizeof(long_target) - 1);
+  long_target[sizeof(long_target) - 1] = '\0';
+
+  // Clean up
+  unlink(filename);
+
+  // Create container
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Add symlink with long target
+  result = bfc_add_symlink(writer, "long_link.txt", long_target, 0755, bfc_os_current_time_ns());
+  assert(result == BFC_OK);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+
+  bfc_close(writer);
+  unlink(filename);
+
+  return 0;
+}
+
+static int test_mixed_content_with_symlinks(void) {
+  const char* filename = "/tmp/test_mixed_symlinks.bfc";
+  const char* content = "Test file content";
+
+  // Clean up
+  unlink(filename);
+
+  // Create temporary source file
+  const char* src_file = "/tmp/test_mixed_src.txt";
+  FILE* src = fopen(src_file, "w");
+  assert(src != NULL);
+  fwrite(content, 1, strlen(content), src);
+  fclose(src);
+
+  // Create container
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  // Add directory
+  result = bfc_add_dir(writer, "testdir", 0755, bfc_os_current_time_ns());
+  assert(result == BFC_OK);
+
+  // Add file
+  src = fopen(src_file, "rb");
+  assert(src != NULL);
+  uint32_t crc = 0;
+  result = bfc_add_file(writer, "testfile.txt", src, 0644, bfc_os_current_time_ns(), &crc);
+  assert(result == BFC_OK);
+  fclose(src);
+
+  // Add symlinks
+  result =
+      bfc_add_symlink(writer, "link_to_file.txt", "testfile.txt", 0755, bfc_os_current_time_ns());
+  assert(result == BFC_OK);
+
+  result = bfc_add_symlink(writer, "link_to_dir", "testdir", 0755, bfc_os_current_time_ns());
+  assert(result == BFC_OK);
+
+  result = bfc_add_symlink(writer, "absolute_link.txt", "/tmp/absolute_target", 0755,
+                           bfc_os_current_time_ns());
+  assert(result == BFC_OK);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+
+  bfc_close(writer);
+
+  // Clean up
+  unlink(src_file);
+  unlink(filename);
+
+  return 0;
+}
+
 int test_writer(void) {
   if (test_create_empty_container() != 0)
     return 1;
@@ -574,6 +796,20 @@ int test_writer(void) {
   if (test_empty_file() != 0)
     return 1;
   if (test_finish_before_close() != 0)
+    return 1;
+  if (test_add_simple_symlink() != 0)
+    return 1;
+  if (test_add_absolute_symlink() != 0)
+    return 1;
+  if (test_add_relative_symlink() != 0)
+    return 1;
+  if (test_symlink_parameter_validation() != 0)
+    return 1;
+  if (test_symlink_duplicate_paths() != 0)
+    return 1;
+  if (test_symlink_long_target() != 0)
+    return 1;
+  if (test_mixed_content_with_symlinks() != 0)
     return 1;
 
   return 0;
