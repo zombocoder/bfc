@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -319,6 +320,65 @@ static int extract_directory(const char* output_path, const bfc_entry_t* entry, 
   return 0;
 }
 
+static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* output_path, int force) {
+  // Check if file exists
+  struct stat st;
+  if (lstat(output_path, &st) == 0) {
+    if (!S_ISLNK(st.st_mode)) {
+      if (!force) {
+        print_error("'%s' exists but is not a symlink. Use -f to overwrite.", output_path);
+        return -1;
+      }
+    }
+    // Remove existing file/symlink
+    if (unlink(output_path) != 0) {
+      print_error("Cannot remove '%s': %s", output_path, strerror(errno));
+      return -1;
+    }
+  }
+
+  // Read symlink target from container
+  char* target = malloc(entry->size + 1);
+  if (!target) {
+    print_error("Out of memory");
+    return -1;
+  }
+
+  size_t bytes_read = bfc_read(reader, entry->path, 0, target, entry->size);
+  if (bytes_read != entry->size) {
+    print_error("Failed to read symlink target for '%s'", entry->path);
+    free(target);
+    return -1;
+  }
+  target[entry->size] = '\0';
+
+  // Create symlink
+  if (symlink(target, output_path) != 0) {
+    print_error("Cannot create symlink '%s' -> '%s': %s", output_path, target, strerror(errno));
+    free(target);
+    return -1;
+  }
+
+  // Set timestamps using lutimes (for symlinks)
+  struct timeval times[2] = {
+      {.tv_sec = entry->mtime_ns / 1000000000ULL,
+       .tv_usec = (entry->mtime_ns % 1000000000ULL) / 1000}, // atime = mtime
+      {.tv_sec = entry->mtime_ns / 1000000000ULL,
+       .tv_usec = (entry->mtime_ns % 1000000000ULL) / 1000} // mtime
+  };
+
+  if (lutimes(output_path, times) != 0) {
+    print_verbose("Warning: cannot set timestamps on symlink '%s': %s", output_path, strerror(errno));
+  }
+
+  if (!g_options.quiet) {
+    printf("Extracted: %s -> %s\n", output_path, target);
+  }
+
+  free(target);
+  return 0;
+}
+
 // Extract callback structure
 typedef struct {
   extract_options_t* opts;
@@ -363,6 +423,8 @@ static int extract_entry_callback(const bfc_entry_t* entry, void* user) {
     result = extract_file(ctx->reader, entry, output_path, opts->force);
   } else if (S_ISDIR(entry->mode)) {
     result = extract_directory(output_path, entry, opts->force);
+  } else if (S_ISLNK(entry->mode)) {
+    result = extract_symlink(ctx->reader, entry, output_path, opts->force);
   } else {
     print_verbose("Skipping special file: %s", entry->path);
     return 0;
