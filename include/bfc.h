@@ -65,6 +65,8 @@ int bfc_create(const char* filename, uint32_t block_size, uint64_t features, bfc
 int bfc_add_file(bfc_t* w, const char* container_path, FILE* src, uint32_t mode, uint64_t mtime_ns,
                  uint32_t* out_crc);
 int bfc_add_dir(bfc_t* w, const char* container_dir, uint32_t mode, uint64_t mtime_ns);
+int bfc_add_symlink(bfc_t* w, const char* container_path, const char* link_target, uint32_t mode,
+                    uint64_t mtime_ns);
 
 /* --- Compression Configuration --- */
 int bfc_set_compression(bfc_t* w, uint8_t comp_type, int level);
