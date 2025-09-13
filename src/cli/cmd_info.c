@@ -157,6 +157,7 @@ typedef struct {
   int total_entries;
   int total_files;
   int total_dirs;
+  int total_symlinks;
   uint64_t total_size;
   uint64_t total_compressed_size;
   int show_detailed;
@@ -173,6 +174,8 @@ static int stats_callback(const bfc_entry_t* entry, void* user) {
     ctx->total_compressed_size += entry->obj_size;
   } else if (S_ISDIR(entry->mode)) {
     ctx->total_dirs++;
+  } else if (S_ISLNK(entry->mode)) {
+    ctx->total_symlinks++;
   }
 
   if (ctx->show_detailed) {
@@ -213,7 +216,7 @@ static void show_container_info(bfc_t* reader, const char* container_file, int s
   }
 
   // Gather statistics
-  stats_context_t ctx = {0, 0, 0, 0, 0, show_detailed};
+  stats_context_t ctx = {0, 0, 0, 0, 0, 0, show_detailed};
 
   if (show_detailed) {
     printf("Entries:\n");
@@ -236,6 +239,9 @@ static void show_container_info(bfc_t* reader, const char* container_file, int s
   printf("  Total entries: %d\n", ctx.total_entries);
   printf("  Files: %d\n", ctx.total_files);
   printf("  Directories: %d\n", ctx.total_dirs);
+  if (ctx.total_symlinks > 0) {
+    printf("  Symlinks: %d\n", ctx.total_symlinks);
+  }
 
   if (has_encryption) {
     printf("  Encryption: ChaCha20-Poly1305\n");
@@ -276,6 +282,7 @@ static void show_entry_info(bfc_t* reader, const char* path) {
   printf("Entry: %s\n", entry.path);
   printf("Type: %s\n", S_ISDIR(entry.mode)   ? "Directory"
                        : S_ISREG(entry.mode) ? "Regular file"
+                       : S_ISLNK(entry.mode) ? "Symlink"
                                              : "Special file");
   printf("Mode: %s (0%04o)\n", mode_str, entry.mode & 0777);
   printf("Size: %s\n", size_str);

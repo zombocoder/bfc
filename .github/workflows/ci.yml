@@ -101,6 +101,75 @@ jobs:
           cd ..
           rm -rf extract_test
 
+          # Test symlink functionality
+          echo "Testing symlink functionality..."
+          
+          # Create test data with symlinks
+          mkdir -p test_symlinks
+          cd test_symlinks
+          echo "Target file content" > target.txt
+          mkdir subdir
+          echo "Nested target" > subdir/nested.txt
+          
+          # Create various types of symlinks
+          ln -sf target.txt simple_link.txt
+          ln -sf subdir/nested.txt relative_link.txt
+          ln -sf /tmp/absolute_target absolute_link.txt
+          ln -sf nonexistent_file broken_link.txt
+          ln -sf subdir dir_link
+          cd ..
+
+          # Test container creation with symlinks
+          ./build/bin/bfc create test_symlinks.bfc test_symlinks/
+          echo "Container with symlinks created"
+
+          # Test symlink listing - verify 'l' prefix appears
+          ./build/bin/bfc list -l test_symlinks.bfc | grep "lrwxr-xr-x.*simple_link.txt" && echo "Simple symlink listed correctly" || echo "Simple symlink listing failed"
+          ./build/bin/bfc list -l test_symlinks.bfc | grep "lrwxr-xr-x.*absolute_link.txt" && echo "Absolute symlink listed correctly" || echo "Absolute symlink listing failed"
+          
+          # Test symlink counting in container info
+          ./build/bin/bfc info test_symlinks.bfc | grep "Symlinks:" && echo "Symlinks counted in container info" || echo "Symlink counting failed"
+          
+          # Test symlink-specific info
+          ./build/bin/bfc info test_symlinks.bfc simple_link.txt | grep "Type: Symlink" && echo "Symlink type displayed correctly" || echo "Symlink type display failed"
+
+          # Test symlink extraction
+          mkdir -p extract_symlinks
+          cd extract_symlinks
+          ../build/bin/bfc extract ../test_symlinks.bfc
+          
+          # Verify symlinks were extracted correctly
+          [ -L simple_link.txt ] && echo "Simple symlink extracted as symlink" || echo "Simple symlink not extracted as symlink"
+          [ -L broken_link.txt ] && echo "Broken symlink extracted as symlink" || echo "Broken symlink not extracted as symlink"
+          
+          # Verify symlink targets
+          if [ -L simple_link.txt ]; then
+            TARGET=$(readlink simple_link.txt)
+            [ "$TARGET" = "target.txt" ] && echo "Simple symlink target correct" || echo "Simple symlink target incorrect: $TARGET"
+          fi
+          
+          if [ -L absolute_link.txt ]; then
+            TARGET=$(readlink absolute_link.txt)
+            [ "$TARGET" = "/tmp/absolute_target" ] && echo "Absolute symlink target correct" || echo "Absolute symlink target incorrect: $TARGET"
+          fi
+          
+          cd ..
+          rm -rf extract_symlinks
+          
+          # Test symlinks with compression and encryption
+          ./build/bin/bfc create -c zstd -e testpass symlinks_comp_enc.bfc test_symlinks/simple_link.txt test_symlinks/absolute_link.txt
+          echo "Symlinks work with compression and encryption"
+          
+          mkdir -p extract_comp_enc
+          cd extract_comp_enc
+          ../build/bin/bfc extract -p testpass ../symlinks_comp_enc.bfc
+          [ -L simple_link.txt ] && echo "Compressed+encrypted symlink extracted correctly" || echo "Compressed+encrypted symlink extraction failed"
+          cd ..
+          rm -rf extract_comp_enc
+          
+          # Clean up symlink test files
+          rm -rf test_symlinks test_symlinks.bfc symlinks_comp_enc.bfc
+
           # Test encryption functionality
           echo "Testing encryption features..."
           ./build/bin/bfc create -e testpassword123 test_encrypted.bfc test_data/

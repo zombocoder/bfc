@@ -116,6 +116,16 @@ static void format_file_mode(uint32_t mode, char* buffer) {
     buffer[0] = 'd';
   else if (S_ISREG(mode))
     buffer[0] = '-';
+  else if (S_ISLNK(mode))
+    buffer[0] = 'l';
+  else if (S_ISBLK(mode))
+    buffer[0] = 'b';
+  else if (S_ISCHR(mode))
+    buffer[0] = 'c';
+  else if (S_ISFIFO(mode))
+    buffer[0] = 'p';
+  else if (S_ISSOCK(mode))
+    buffer[0] = 's';
   else
     buffer[0] = '?';
 

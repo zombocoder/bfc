@@ -524,6 +524,92 @@ int bfc_add_dir(bfc_t* w, const char* container_dir, uint32_t mode, uint64_t mti
   return result;
 }
 
+int bfc_add_symlink(bfc_t* w, const char* container_path, const char* link_target, uint32_t mode,
+                    uint64_t mtime_ns) {
+  if (!w || !container_path || !link_target || w->finished) {
+    return BFC_E_INVAL;
+  }
+
+  // Normalize path
+  char* norm_path;
+  int result = bfc_path_normalize(container_path, &norm_path);
+  if (result != BFC_OK) {
+    return result;
+  }
+
+  uint64_t obj_start = w->current_offset;
+  size_t target_len = strlen(link_target);
+
+  // Create object header for symlink
+  struct bfc_obj_hdr obj_hdr = {.type = BFC_TYPE_SYMLINK,
+                                .comp = BFC_COMP_NONE,
+                                .enc = BFC_ENC_NONE,
+                                .reserved = 0,
+                                .name_len = (uint16_t) strlen(norm_path),
+                                .padding = 0,
+                                .mode = mode | S_IFLNK, // Add symlink type bits
+                                .mtime_ns = mtime_ns,
+                                .orig_size = target_len,
+                                .enc_size = target_len,
+                                .crc32c = 0}; // Will be calculated below
+
+  // Calculate CRC32C of link target
+  uint32_t crc = bfc_crc32c_compute(link_target, target_len);
+  obj_hdr.crc32c = crc;
+
+  // Write object header
+  if (fwrite(&obj_hdr, 1, sizeof(obj_hdr), w->file) != sizeof(obj_hdr)) {
+    bfc_path_free(norm_path);
+    return BFC_E_IO;
+  }
+
+  // Write path
+  if (fwrite(norm_path, 1, obj_hdr.name_len, w->file) != obj_hdr.name_len) {
+    bfc_path_free(norm_path);
+    return BFC_E_IO;
+  }
+
+  // Write padding after path to 16-byte boundary
+  size_t hdr_name_size = sizeof(obj_hdr) + obj_hdr.name_len;
+  size_t padding = bfc_padding_size(hdr_name_size, BFC_ALIGN);
+  if (padding > 0) {
+    uint8_t pad[BFC_ALIGN] = {0};
+    if (fwrite(pad, 1, padding, w->file) != padding) {
+      bfc_path_free(norm_path);
+      return BFC_E_IO;
+    }
+  }
+
+  // Write link target data
+  if (fwrite(link_target, 1, target_len, w->file) != target_len) {
+    bfc_path_free(norm_path);
+    return BFC_E_IO;
+  }
+
+  // Write padding after target to 16-byte boundary
+  size_t target_padding = bfc_padding_size(target_len, BFC_ALIGN);
+  if (target_padding > 0) {
+    uint8_t pad[BFC_ALIGN] = {0};
+    if (fwrite(pad, 1, target_padding, w->file) != target_padding) {
+      bfc_path_free(norm_path);
+      return BFC_E_IO;
+    }
+  }
+
+  uint64_t obj_size = sizeof(obj_hdr) + obj_hdr.name_len + padding + target_len + target_padding;
+
+  // Add to index
+  result = add_path_to_index(w, norm_path, obj_start, obj_size, mode | S_IFLNK, mtime_ns,
+                             BFC_COMP_NONE, BFC_ENC_NONE, target_len, crc);
+
+  if (result == BFC_OK) {
+    w->current_offset = obj_start + obj_size;
+  }
+
+  bfc_path_free(norm_path);
+  return result;
+}
+
 static int index_entry_compare(const void* a, const void* b) {
   const bfc_index_entry_t* ea = (const bfc_index_entry_t*) a;
   const bfc_index_entry_t* eb = (const bfc_index_entry_t*) b;
