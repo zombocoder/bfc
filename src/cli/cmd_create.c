@@ -232,6 +232,41 @@ static int add_file_to_container(bfc_t* writer, const char* file_path, const cha
   return 0;
 }
 
+static int add_symlink_to_container(bfc_t* writer, const char* link_path, const char* container_path) {
+  print_verbose("Adding symlink: %s -> %s", link_path, container_path);
+
+  // Read the symlink target
+  char target[1024];
+  ssize_t target_len = readlink(link_path, target, sizeof(target) - 1);
+  if (target_len == -1) {
+    print_error("Cannot readlink '%s': %s", link_path, strerror(errno));
+    return -1;
+  }
+  target[target_len] = '\0';
+
+  // Get symlink stats
+  struct stat st;
+  if (lstat(link_path, &st) != 0) {
+    print_error("Cannot lstat symlink '%s': %s", link_path, strerror(errno));
+    return -1;
+  }
+
+  // Add symlink to container
+  uint64_t mtime_ns = (uint64_t) st.st_mtime * 1000000000ULL;
+  int result = bfc_add_symlink(writer, container_path, target, st.st_mode & 0777, mtime_ns);
+
+  if (result != BFC_OK) {
+    print_error("Failed to add symlink '%s': %s", container_path, bfc_error_string(result));
+    return -1;
+  }
+
+  if (!g_options.quiet) {
+    printf("Added: %s -> %s\n", container_path, target);
+  }
+
+  return 0;
+}
+
 static int add_directory_to_container(bfc_t* writer, const char* dir_path,
                                       const char* container_path);
 
@@ -249,8 +284,8 @@ static int process_directory_entry(bfc_t* writer, const char* base_path, const c
   }
 
   struct stat st;
-  if (stat(full_path, &st) != 0) {
-    print_error("Cannot stat '%s': %s", full_path, strerror(errno));
+  if (lstat(full_path, &st) != 0) {
+    print_error("Cannot lstat '%s': %s", full_path, strerror(errno));
     return -1;
   }
 
@@ -258,6 +293,8 @@ static int process_directory_entry(bfc_t* writer, const char* base_path, const c
     return add_file_to_container(writer, full_path, container_path);
   } else if (S_ISDIR(st.st_mode)) {
     return add_directory_to_container(writer, full_path, container_path);
+  } else if (S_ISLNK(st.st_mode)) {
+    return add_symlink_to_container(writer, full_path, container_path);
   } else {
     print_verbose("Skipping special file: %s", full_path);
     return 0;
@@ -417,7 +454,7 @@ int cmd_create(int argc, char* argv[]) {
     const char* input_path = opts.input_paths[i];
 
     struct stat st;
-    if (stat(input_path, &st) != 0) {
+    if (lstat(input_path, &st) != 0) {
       print_error("Cannot access '%s': %s", input_path, strerror(errno));
       bfc_close(writer);
       return 1;
@@ -448,8 +485,13 @@ int cmd_create(int argc, char* argv[]) {
         bfc_close(writer);
         return 1;
       }
+    } else if (S_ISLNK(st.st_mode)) {
+      if (add_symlink_to_container(writer, input_path, basename) != 0) {
+        bfc_close(writer);
+        return 1;
+      }
     } else {
-      print_error("'%s' is not a regular file or directory", input_path);
+      print_error("'%s' is not a regular file, directory, or symlink", input_path);
       bfc_close(writer);
       return 1;
     }
