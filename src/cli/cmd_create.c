@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#define _GNU_SOURCE
 #include "cli.h"
 #include <dirent.h>
 #include <errno.h>
