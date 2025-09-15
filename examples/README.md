@@ -83,6 +83,57 @@ Demonstrates encryption and decryption features using ChaCha20-Poly1305 AEAD enc
 
 **Note:** This example is only available when BFC is built with libsodium support (`-DBFC_WITH_SODIUM=ON`).
 
+### 5. oci_example.c
+Demonstrates how to use BFC as an OCI (Open Container Initiative) image storage format with dynamic architecture and OS detection.
+
+**Features shown:**
+- Dynamic detection of current architecture and operating system
+- Creating OCI-compliant image manifests
+- Building OCI configuration JSON dynamically
+- Adding OCI layers to BFC containers
+- Cross-platform compatibility (Linux, Windows, macOS, BSD variants)
+- Support for multiple architectures (x86_64, ARM64, RISC-V, PowerPC, etc.)
+- Proper memory management and cleanup
+- Integration with BFC's OCI support features
+
+**Architecture Detection:**
+- **x86_64/AMD64**: `amd64`
+- **ARM64**: `arm64` 
+- **i386**: `386`
+- **PowerPC 64-bit LE**: `ppc64le`
+- **PowerPC 64-bit**: `ppc64`
+- **RISC-V 64-bit**: `riscv64`
+- **RISC-V**: `riscv` (fallback)
+
+**OS Detection:**
+- **Linux**: `linux`
+- **Windows**: `windows`
+- **macOS**: `darwin`
+- **FreeBSD**: `freebsd`
+- **OpenBSD**: `openbsd`
+- **NetBSD**: `netbsd`
+
+**Usage:**
+```bash
+# Build with OCI support
+cmake -S . -B build -DBFC_WITH_OCI=ON
+cmake --build build
+
+# Run the OCI example
+cd build/examples
+./bfc_oci_example
+```
+
+**Output example:**
+```
+BFC OCI Image Specs Example
+Detected architecture: amd64, OS: linux
+Using config: {"architecture":"amd64","os":"linux"}
+Successfully created BFC container with OCI image specs
+```
+
+**Note:** This example is only available when BFC is built with OCI support (`-DBFC_WITH_OCI=ON`).
+
 ## Building the Examples
 
 ### Option 1: Build with main project

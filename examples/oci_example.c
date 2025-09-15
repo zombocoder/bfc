@@ -20,8 +20,76 @@
 #include <string.h>
 #include "bfc_oci.h"
 
+static const char* detect_os(void) {
+    // Map OS to OCI "os" names
+    #if defined(__linux__)
+        return "linux";
+    #elif defined(_WIN32)
+        return "windows";
+    #elif defined(__APPLE__) && defined(__MACH__)
+        return "darwin";
+    #elif defined(__FreeBSD__)
+        return "freebsd";
+    #elif defined(__OpenBSD__)
+        return "openbsd";
+    #elif defined(__NetBSD__)
+        return "netbsd";
+    #else
+        return "unknown";
+    #endif
+}
+
+static const char* detect_arch(void) {
+    // Map common compiler macros to OCI arch names
+    #if defined(__x86_64__) || defined(_M_X64)
+        return "amd64";
+    #elif defined(__aarch64__) || defined(_M_ARM64)
+        return "arm64";
+    #elif defined(__i386__) || defined(_M_IX86)
+        return "386";
+    #elif defined(__ppc64le__)
+        return "ppc64le";
+    #elif defined(__ppc64__)
+        return "ppc64";
+    #elif defined(__riscv) || defined(__riscv__)
+        #if defined(__riscv_xlen) && __riscv_xlen == 64
+            return "riscv64";
+        #else
+            return "riscv"; // fallback
+        #endif
+    #else
+        return "unknown";
+    #endif
+}
+
+static int build_oci_config_json(char **out_json) {
+    if (!out_json) return -1;
+    const char *arch = detect_arch();
+    const char *os   = detect_os();
+
+    // 2 keys + quotes + punctuation; 64 is plenty of slack
+    size_t need = strlen(arch) + strlen(os) + 64;
+    char *buf = (char*)malloc(need);
+    if (!buf) return -1;
+
+    // You can add more fields here later (env, cmd, rootfs, etc.)
+    // Keep it minimal for your example.
+    int n = snprintf(buf, need,
+                     "{\"architecture\":\"%s\",\"os\":\"%s\"}",
+                     arch, os);
+    if (n < 0 || (size_t)n >= need) { free(buf); return -1; }
+
+    *out_json = buf;
+    return 0;
+}
+
 int main() {
     printf("BFC OCI Image Specs Example\n");
+    
+    // Detect current architecture and OS
+    const char *arch = detect_arch();
+    const char *os = detect_os();
+    printf("Detected architecture: %s, OS: %s\n", arch, os);
     
     // Create BFC container
     bfc_t* bfc = NULL;
@@ -48,8 +116,24 @@ int main() {
     manifest->layer_digests[1] = strdup("sha256:ghi789...");
     manifest->annotations = strdup("{}");
     
-    // Create OCI config
-    const char* config_json = "{\"architecture\":\"amd64\",\"os\":\"linux\"}";
+    // Create OCI config (dynamic)
+    char *config_json = NULL;
+    if (build_oci_config_json(&config_json) != 0) {
+        fprintf(stderr, "Failed to build OCI config JSON\n");
+        // clean up and return...
+        bfc_close(bfc);
+        free(manifest->schema_version);
+        free(manifest->media_type);
+        free(manifest->config_digest);
+        free(manifest->layer_digests[0]);
+        free(manifest->layer_digests[1]);
+        free(manifest->layer_digests);
+        free(manifest->annotations);
+        free(manifest);
+        return 1;
+    }
+    
+    printf("Using config: %s\n", config_json);
     
     // Add manifest to BFC
     if (bfc_create_from_oci_manifest(bfc, manifest, config_json) != BFC_OK) {
@@ -104,6 +188,7 @@ int main() {
     printf("Successfully created BFC container with OCI image specs\n");
     
     // Cleanup
+    free(config_json);
     bfc_free_oci_layer(layer1);
     bfc_free_oci_manifest(manifest);
     bfc_close(bfc);

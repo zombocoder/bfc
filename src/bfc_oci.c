@@ -19,6 +19,58 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <inttypes.h>
+#include <libgen.h>
+
+// Callback to collect all file entries for extraction
+struct extract_context {
+    char** files;
+    int count;
+    int capacity;
+};
+
+static int collect_files(const bfc_entry_t* entry, void* user) {
+    struct extract_context* ctx = (struct extract_context*) user;
+
+    // Only collect regular files, skip directories
+    if (!S_ISREG(entry->mode)) {
+        return 0;
+    }
+
+    // Expand array if needed
+    if (ctx->count >= ctx->capacity) {
+        ctx->capacity = ctx->capacity ? ctx->capacity * 2 : 10;
+        ctx->files = realloc(ctx->files, ctx->capacity * sizeof(char*));
+        if (!ctx->files) {
+            return -1;
+        }
+    }
+
+    // Store a copy of the path
+    ctx->files[ctx->count] = strdup(entry->path);
+    if (!ctx->files[ctx->count]) {
+        return -1;
+    }
+    ctx->count++;
+
+    return 0;
+}
+
+static void cleanup_extract_context(struct extract_context* ctx) {
+    if (ctx->files) {
+        for (int i = 0; i < ctx->count; i++) {
+            free(ctx->files[i]);
+        }
+        free(ctx->files);
+        ctx->files = NULL;
+    }
+    ctx->count = 0;
+    ctx->capacity = 0;
+}
 
 // Create BFC container from OCI image manifest
 int bfc_create_from_oci_manifest(bfc_t* bfc, const bfc_oci_manifest_t* manifest, const char* config_json) {
@@ -87,13 +139,122 @@ int bfc_extract_to_oci(bfc_t* bfc, const char* output_dir) {
         return BFC_E_INVAL;
     }
     
-    // TODO: Implement OCI extraction
-    // This would involve:
-    // 1. Creating the OCI directory structure
-    // 2. Extracting manifest.json
-    // 3. Extracting config.json
-    // 4. Extracting layer blobs
+    // Create OCI directory structure
+    char oci_dir[1024];
+    snprintf(oci_dir, sizeof(oci_dir), "%s/oci", output_dir);
     
+    if (mkdir(oci_dir, 0755) != 0 && errno != EEXIST) {
+        return BFC_E_IO;
+    }
+    
+    // Create blobs directory
+    char blobs_dir[1024];
+    snprintf(blobs_dir, sizeof(blobs_dir), "%s/blobs", oci_dir);
+    
+    if (mkdir(blobs_dir, 0755) != 0 && errno != EEXIST) {
+        return BFC_E_IO;
+    }
+    
+    // Create sha256 subdirectory
+    char sha256_dir[1024];
+    snprintf(sha256_dir, sizeof(sha256_dir), "%s/sha256", blobs_dir);
+    
+    if (mkdir(sha256_dir, 0755) != 0 && errno != EEXIST) {
+        return BFC_E_IO;
+    }
+    
+    // Extract OCI manifest
+    char manifest_path[1024];
+    snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", oci_dir);
+    
+    int manifest_fd = open(manifest_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (manifest_fd < 0) {
+        return BFC_E_IO;
+    }
+    
+    int result = bfc_extract_to_fd(bfc, "manifest.json", manifest_fd);
+    close(manifest_fd);
+    
+    if (result != BFC_OK) {
+        return result;
+    }
+    
+    // Extract OCI config
+    char config_path[1024];
+    snprintf(config_path, sizeof(config_path), "%s/config.json", oci_dir);
+    
+    int config_fd = open(config_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (config_fd < 0) {
+        return BFC_E_IO;
+    }
+    
+    result = bfc_extract_to_fd(bfc, "config.json", config_fd);
+    close(config_fd);
+    
+    if (result != BFC_OK) {
+        return result;
+    }
+    
+    // Extract layer blobs using callback approach
+    struct extract_context ctx = {0};
+    result = bfc_list(bfc, "layers/", collect_files, &ctx);
+    if (result != BFC_OK) {
+        cleanup_extract_context(&ctx);
+        return result;
+    }
+    
+    printf("Found %d layer files to extract\n", ctx.count);
+    
+    for (int i = 0; i < ctx.count; i++) {
+        const char* file_path = ctx.files[i];
+        printf("Extracting layer: %s\n", file_path);
+        
+        // Create output path in blobs/sha256/
+        char output_path[1024];
+        snprintf(output_path, sizeof(output_path), "%s/%s", sha256_dir, file_path);
+        
+        // Create parent directories if needed
+        char* path_copy = strdup(output_path);
+        if (!path_copy) {
+            cleanup_extract_context(&ctx);
+            return BFC_E_NOMEM;
+        }
+        
+        char* dir = dirname(path_copy);
+        if (mkdir(dir, 0755) != 0 && errno != EEXIST) {
+            free(path_copy);
+            cleanup_extract_context(&ctx);
+            return BFC_E_IO;
+        }
+        free(path_copy);
+        
+        // Open output file
+        int out_fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (out_fd < 0) {
+            fprintf(stderr, "Failed to create output file '%s': %s\n", output_path, strerror(errno));
+            continue;
+        }
+        
+        // Extract file content
+        result = bfc_extract_to_fd(bfc, file_path, out_fd);
+        close(out_fd);
+        
+        if (result != BFC_OK) {
+            fprintf(stderr, "Failed to extract '%s': %d\n", file_path, result);
+            unlink(output_path); // Remove partial file
+        } else {
+            // Get file stats for verification
+            bfc_entry_t entry;
+            if (bfc_stat(bfc, file_path, &entry) == BFC_OK) {
+                printf("  Layer size: %" PRIu64 " bytes, CRC32C: 0x%08x\n", entry.size, entry.crc32c);
+            }
+        }
+    }
+    
+    // Clean up
+    cleanup_extract_context(&ctx);
+    
+    printf("OCI extraction complete to: %s\n", oci_dir);
     return BFC_OK;
 }
 
