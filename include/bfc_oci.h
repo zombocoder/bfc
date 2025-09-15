@@ -16,10 +16,10 @@
  */
 
 #pragma once
+#include "bfc.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-#include "bfc.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,49 +30,50 @@ extern "C" {
 
 // OCI Image Manifest structure
 typedef struct {
-    char* schema_version;
-    char* media_type;
-    char* config_digest;
-    size_t config_size;
-    char** layer_digests;
-    size_t layer_count;
-    char* annotations;
+  char* schema_version;
+  char* media_type;
+  char* config_digest;
+  size_t config_size;
+  char** layer_digests;
+  size_t layer_count;
+  char* annotations;
 } bfc_oci_manifest_t;
 
 // OCI Image Config structure
 typedef struct {
-    char* architecture;
-    char* os;
-    char* created;
-    char* author;
-    char* config;
-    char* rootfs;
-    char* history;
+  char* architecture;
+  char* os;
+  char* created;
+  char* author;
+  char* config;
+  char* rootfs;
+  char* history;
 } bfc_oci_config_t;
 
 // OCI Layer structure
 typedef struct {
-    char* digest;
-    char* media_type;
-    size_t size;
-    char** urls;
-    size_t url_count;
-    char* annotations;
+  char* digest;
+  char* media_type;
+  size_t size;
+  char** urls;
+  size_t url_count;
+  char* annotations;
 } bfc_oci_layer_t;
 
 // OCI Image Index structure
 typedef struct {
-    char* schema_version;
-    char* media_type;
-    bfc_oci_manifest_t** manifests;
-    size_t manifest_count;
-    char* annotations;
+  char* schema_version;
+  char* media_type;
+  bfc_oci_manifest_t** manifests;
+  size_t manifest_count;
+  char* annotations;
 } bfc_oci_index_t;
 
 // OCI Image functions
 
 /// Create BFC container from OCI image manifest
-int bfc_create_from_oci_manifest(bfc_t* bfc, const bfc_oci_manifest_t* manifest, const char* config_json);
+int bfc_create_from_oci_manifest(bfc_t* bfc, const bfc_oci_manifest_t* manifest,
+                                 const char* config_json);
 
 /// Create BFC container from OCI image index
 int bfc_create_from_oci_index(bfc_t* bfc, const bfc_oci_index_t* index);
