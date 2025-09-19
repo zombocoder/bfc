@@ -68,16 +68,15 @@ static int build_oci_config_json(char** out_json) {
   const char* arch = detect_arch();
   const char* os = detect_os();
 
-  // 2 keys + quotes + punctuation; 64 is plenty of slack
-  size_t need = strlen(arch) + strlen(os) + 64;
-  char* buf = (char*) malloc(need);
+   // Calculate required buffer size for the JSON string
+  int n = snprintf(NULL, 0, "{\"architecture\":\"%s\",\"os\":\"%s\"}", arch, os);
+  if (n < 0)
+    return -1;
+  char* buf = (char*) malloc((size_t)n + 1);
   if (!buf)
     return -1;
-
-  // You can add more fields here later (env, cmd, rootfs, etc.)
-  // Keep it minimal for your example.
-  int n = snprintf(buf, need, "{\"architecture\":\"%s\",\"os\":\"%s\"}", arch, os);
-  if (n < 0 || (size_t) n >= need) {
+  int written = snprintf(buf, (size_t)n + 1, "{\"architecture\":\"%s\",\"os\":\"%s\"}", arch, os);
+  if (written < 0 || written != n) {
     free(buf);
     return -1;
   }

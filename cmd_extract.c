@@ -19,6 +19,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <libgen.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -397,7 +398,6 @@ static int extract_entry_callback(const bfc_entry_t* entry, void* user) {
   ctx->count++;
 
   // Determine output path
-  char output_path[1024];
   const char* extract_name;
 
   if (opts->preserve_paths) {
@@ -413,29 +413,56 @@ static int extract_entry_callback(const bfc_entry_t* entry, void* user) {
     }
   }
 
-  if (ctx->output_dir) {
-    snprintf(output_path, sizeof(output_path), "%s/%s", ctx->output_dir, extract_name);
-  } else {
-    snprintf(output_path, sizeof(output_path), "%s", extract_name);
-  }
+  // Calculate required buffer size for output path
+  size_t output_dir_len = ctx->output_dir ? strlen(ctx->output_dir) : 0;
+  size_t extract_name_len = strlen(extract_name);
+  size_t total_len = output_dir_len + extract_name_len + 2; // +2 for '/' and null terminator
 
-  // Extract based on entry type
-  int result;
-  if (S_ISREG(entry->mode)) {
-    result = extract_file(ctx->reader, entry, output_path, opts->force);
-  } else if (S_ISDIR(entry->mode)) {
-    result = extract_directory(output_path, entry, opts->force);
-  } else if (S_ISLNK(entry->mode)) {
-    result = extract_symlink(ctx->reader, entry, output_path, opts->force);
-  } else {
-    print_verbose("Skipping special file: %s", entry->path);
+  // Use PATH_MAX as minimum buffer size, but allow for longer paths if needed
+  size_t buffer_size = (total_len > PATH_MAX) ? total_len : PATH_MAX;
+  
+  char* output_path = malloc(buffer_size);
+  if (!output_path) {
+    print_error("Out of memory while allocating path buffer");
+    ctx->errors++;
     return 0;
   }
 
-  if (result != 0) {
+  // Build output path with bounds checking
+  int result;
+  if (ctx->output_dir) {
+    result = snprintf(output_path, buffer_size, "%s/%s", ctx->output_dir, extract_name);
+  } else {
+    result = snprintf(output_path, buffer_size, "%s", extract_name);
+  }
+
+  // Check for truncation
+  if (result < 0 || (size_t)result >= buffer_size) {
+    print_error("Path too long: %s/%s", ctx->output_dir ? ctx->output_dir : "", extract_name);
+    free(output_path);
+    ctx->errors++;
+    return 0;
+  }
+
+  // Extract based on entry type
+  int extract_result;
+  if (S_ISREG(entry->mode)) {
+    extract_result = extract_file(ctx->reader, entry, output_path, opts->force);
+  } else if (S_ISDIR(entry->mode)) {
+    extract_result = extract_directory(output_path, entry, opts->force);
+  } else if (S_ISLNK(entry->mode)) {
+    extract_result = extract_symlink(ctx->reader, entry, output_path, opts->force);
+  } else {
+    print_verbose("Skipping special file: %s", entry->path);
+    free(output_path);
+    return 0;
+  }
+
+  if (extract_result != 0) {
     ctx->errors++;
   }
 
+  free(output_path);
   return 0;
 }
 

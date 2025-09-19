@@ -218,7 +218,7 @@ int bfc_extract_to_oci(bfc_t* bfc, const char* output_dir) {
     char* path_copy = strdup(output_path);
     if (!path_copy) {
       cleanup_extract_context(&ctx);
-      return BFC_E_NOMEM;
+      return BFC_E_NOTFOUND;
     }
 
     char* dir = dirname(path_copy);
