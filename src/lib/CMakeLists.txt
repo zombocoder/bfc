@@ -36,11 +36,10 @@ set(BFC_LIB_HEADERS
 add_library(bfc STATIC ${BFC_LIB_SOURCES})
 add_library(bfc_shared SHARED ${BFC_LIB_SOURCES})
 
-# Enable SSE4.2 for CRC32C hardware support on x86_64
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    set_source_files_properties(bfc_crc32c.c PROPERTIES
-        COMPILE_FLAGS "-msse4.2"
-    )
+# Enable SSE4.2 and CRC32 for hardware support on x86_64
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+    target_compile_options(bfc PRIVATE -msse4.2 -mcrc32)
+    target_compile_options(bfc_shared PRIVATE -msse4.2 -mcrc32)
 endif()
 
 # Set properties for both libraries
