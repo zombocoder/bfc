@@ -305,6 +305,8 @@ int bfc_os_advise_nocache(FILE* file) {
     return BFC_E_INVAL;
   int fd = fileno(file);
   posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+#else
+  (void) file; // Suppress unused parameter warning
 #endif
   return BFC_OK;
 }
