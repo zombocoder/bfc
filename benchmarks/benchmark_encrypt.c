@@ -344,7 +344,7 @@ static int benchmark_encrypted_containers(void) {
         
         // Set decryption password if needed
         if (scenarios[sc].use_encryption) {
-            result = bfc_set_encryption_password(reader, "benchmark_pass", 14);
+            result = bfc_reader_set_encryption_password(reader, "benchmark_pass", 14);
             if (result != BFC_OK) {
                 printf("Failed to set decryption password: %d\n", result);
                 bfc_close_read(reader);
