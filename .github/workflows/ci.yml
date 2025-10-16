@@ -54,40 +54,42 @@ jobs:
           echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
           echo "CXX=${{ matrix.cxx }}" >> $GITHUB_ENV
 
-      - name: Configure CMake
-        run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cmake -B build \
-              -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-              -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake \
-              -DBFC_WITH_ZSTD=ON \
-              -DBFC_WITH_SODIUM=ON
-          else
-            cmake -B build \
-              -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-              -DCMAKE_C_COMPILER=${{ matrix.cc }} \
-              -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
-              -DBFC_WITH_ZSTD=ON \
-              -DBFC_WITH_SODIUM=ON
-          fi
+      - name: Configure CMake (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DBFC_WITH_ZSTD=ON -DBFC_WITH_SODIUM=ON
 
-      - name: Build
+      - name: Configure CMake (Unix)
+        if: matrix.os != 'windows-latest'
         run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cmake --build build --config ${{ matrix.build_type }} --parallel
-          else
-            cmake --build build --config ${{ matrix.build_type }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
-          fi
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+            -DBFC_WITH_ZSTD=ON \
+            -DBFC_WITH_SODIUM=ON
 
-      - name: Run tests
-        if: matrix.build_type == 'Debug'
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+
+      - name: Build (Unix)
+        if: matrix.os != 'windows-latest'
+        run: cmake --build build --config ${{ matrix.build_type }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Run tests (Windows)
+        if: matrix.build_type == 'Debug' && matrix.os == 'windows-latest'
+        shell: cmd
         run: |
           cd build
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            ctest --output-on-failure --parallel --config ${{ matrix.build_type }}
-          else
-            ctest --output-on-failure --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu)
-          fi
+          ctest --output-on-failure --parallel --config ${{ matrix.build_type }}
+
+      - name: Run tests (Unix)
+        if: matrix.build_type == 'Debug' && matrix.os != 'windows-latest'
+        run: |
+          cd build
+          ctest --output-on-failure --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
       - name: Test CLI functionality
         if: matrix.os != 'windows-latest'
