@@ -19,7 +19,11 @@
 #include <string.h>
 
 #if defined(__x86_64__) || defined(_M_X64)
+#ifdef _WIN32
+#include <intrin.h>
+#else
 #include <cpuid.h>
+#endif
 #include <immintrin.h>
 #define HAS_X86_64 1
 #elif defined(__aarch64__) || defined(_M_ARM64)
