@@ -21,7 +21,12 @@
 #include <stdio.h>
 
 #ifdef _WIN32
+#include <sys/stat.h>
 #include <windows.h>
+// Define missing POSIX constants for Windows
+#ifndef S_IFLNK
+#define S_IFLNK 0120000 // Symbolic link file type
+#endif
 #else
 #include <sys/types.h>
 #include <unistd.h>
