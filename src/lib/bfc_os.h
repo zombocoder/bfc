@@ -21,7 +21,17 @@
 #include <stdio.h>
 
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <sys/stat.h>
 #include <windows.h>
+// Define missing POSIX constants for Windows
+#ifndef S_IFLNK
+#define S_IFLNK 0120000 // Symbolic link file type
+#endif
+// Define missing POSIX types for Windows
+#ifndef ssize_t
+typedef SSIZE_T ssize_t;
+#endif
 #else
 #include <sys/types.h>
 #include <unistd.h>
