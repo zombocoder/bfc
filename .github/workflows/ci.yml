@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         build_type: [Debug, Release]
         include:
           - os: ubuntu-latest
@@ -20,6 +20,9 @@ jobs:
           - os: macos-latest
             cc: clang
             cxx: clang++
+          - os: windows-latest
+            cc: cl
+            cxx: cl
 
     runs-on: ${{ matrix.os }}
 
@@ -39,6 +42,13 @@ jobs:
           brew install clang-format zstd libsodium || true
           # cmake is already available on macOS runners
 
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          # Install vcpkg dependencies
+          vcpkg install zstd:x64-windows libsodium:x64-windows
+          # Visual Studio Build Tools are already available
+
       - name: Set up environment
         run: |
           echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
@@ -46,23 +56,41 @@ jobs:
 
       - name: Configure CMake
         run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
-            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
-            -DBFC_WITH_ZSTD=ON \
-            -DBFC_WITH_SODIUM=ON
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cmake -B build \
+              -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake \
+              -DBFC_WITH_ZSTD=ON \
+              -DBFC_WITH_SODIUM=ON
+          else
+            cmake -B build \
+              -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+              -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+              -DBFC_WITH_ZSTD=ON \
+              -DBFC_WITH_SODIUM=ON
+          fi
 
       - name: Build
-        run: cmake --build build --config ${{ matrix.build_type }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cmake --build build --config ${{ matrix.build_type }} --parallel
+          else
+            cmake --build build --config ${{ matrix.build_type }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+          fi
 
       - name: Run tests
         if: matrix.build_type == 'Debug'
         run: |
           cd build
-          ctest --output-on-failure --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu)
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            ctest --output-on-failure --parallel --config ${{ matrix.build_type }}
+          else
+            ctest --output-on-failure --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu)
+          fi
 
       - name: Test CLI functionality
+        if: matrix.os != 'windows-latest'
         run: |
           # Create test data
           mkdir -p test_data
@@ -219,6 +247,7 @@ jobs:
           rm -rf test_encrypted.bfc test_keyfile.bfc test_enc_comp.bfc test.key
 
       - name: Run benchmarks
+        if: matrix.os != 'windows-latest'
         run: |
           cd build/benchmarks
           ./benchmark_crc32c
