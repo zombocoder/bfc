@@ -28,6 +28,7 @@ int test_util(void);
 int test_os(void);
 int test_compress(void);
 int test_encrypt(void);
+int test_oci(void);
 // int test_encrypt_integration(void);  // Temporarily disabled
 
 typedef struct {
@@ -45,6 +46,7 @@ static test_case_t tests[] = {
     {"os", test_os},
     {"compress", test_compress},
     {"encrypt", test_encrypt},
+    {"oci", test_oci},
     // {"encrypt_integration", test_encrypt_integration},  // Temporarily disabled
     {NULL, NULL}};
 

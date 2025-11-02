@@ -26,7 +26,7 @@ set(BFC_LIB_SOURCES
 
 # Add OCI support if enabled
 if(BFC_WITH_OCI)
-    list(APPEND BFC_LIB_SOURCES ../bfc_oci.c)
+    list(APPEND BFC_LIB_SOURCES bfc_oci.c)
     message(STATUS "OCI Image Specs support enabled")
 endif()
 
@@ -77,6 +77,10 @@ foreach(target bfc bfc_shared)
         target_compile_definitions(${target} PRIVATE BFC_WITH_SODIUM)
         target_include_directories(${target} PRIVATE ${SODIUM_INCLUDE_DIRS})
         target_link_directories(${target} PRIVATE ${SODIUM_LIBRARY_DIRS})
+    endif()
+    
+    if(BFC_WITH_OCI)
+        target_compile_definitions(${target} PRIVATE BFC_WITH_OCI)
     endif()
 endforeach()
 
