@@ -15,7 +15,7 @@ A high-performance, single-file container format for storing files and directori
 - **Optional compression** - ZSTD compression with intelligent content analysis
 - **Optional encryption** - ChaCha20-Poly1305 AEAD with Argon2id key derivation
 - **Integrity validation** - CRC32C checksums with hardware acceleration
-- **Cross-platform** - Works on Linux, macOS, and other Unix systems
+- **Cross-platform** - Works on Linux, macOS, FreeBSD, and other Unix systems
 - **Crash-safe writes** - Atomic container creation with index at EOF
 - **Memory efficient** - Optimized for large containers and small memory footprint
 
@@ -53,6 +53,7 @@ cmake --build build
 **Optional dependencies:**
 - ZSTD library for compression support
 - libsodium for encryption support
+- pkg-config (or pkgconf on FreeBSD) for dependency detection
 
 ### Build from source
 
@@ -70,6 +71,20 @@ cmake --build build
 
 # Install system-wide
 sudo cmake --install build --prefix /usr/local
+```
+
+**FreeBSD-specific setup:**
+
+```bash
+# Install dependencies
+sudo pkg install cmake pkgconf libzstd libsodium
+
+# Build (uses gmake wrapper)
+make
+
+# Or use cmake directly
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBFC_WITH_ZSTD=ON -DBFC_WITH_SODIUM=ON
+make -C build
 ```
 
 ### Build options
@@ -618,9 +633,9 @@ limitations under the License.
 - Initial release
 - Complete CLI tool with create, list, extract, info, verify commands
 - C library with full read/write API
-- Hardware-accelerated CRC32C
+- Hardware-accelerated CRC32C (SSE4.2 on x86_64)
 - Comprehensive test suite
-- Cross-platform support (Linux, macOS)
+- Cross-platform support (Linux, macOS, FreeBSD)
 - Performance optimizations
 - Security hardening
 
