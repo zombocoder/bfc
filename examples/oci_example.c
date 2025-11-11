@@ -68,14 +68,14 @@ static int build_oci_config_json(char** out_json) {
   const char* arch = detect_arch();
   const char* os = detect_os();
 
-   // Calculate required buffer size for the JSON string
+  // Calculate required buffer size for the JSON string
   int n = snprintf(NULL, 0, "{\"architecture\":\"%s\",\"os\":\"%s\"}", arch, os);
   if (n < 0)
     return -1;
-  char* buf = (char*) malloc((size_t)n + 1);
+  char* buf = (char*) malloc((size_t) n + 1);
   if (!buf)
     return -1;
-  int written = snprintf(buf, (size_t)n + 1, "{\"architecture\":\"%s\",\"os\":\"%s\"}", arch, os);
+  int written = snprintf(buf, (size_t) n + 1, "{\"architecture\":\"%s\",\"os\":\"%s\"}", arch, os);
   if (written < 0 || written != n) {
     free(buf);
     return -1;
