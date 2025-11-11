@@ -14,12 +14,13 @@
  * limitations under the License.
  */
 
+#include <stdio.h>
+
 #ifdef BFC_WITH_OCI
 
 #include "bfc_os.h"
 #include <assert.h>
 #include <bfc.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
