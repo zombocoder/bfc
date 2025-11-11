@@ -24,6 +24,7 @@ set(UNIT_TEST_SOURCES
     test_os.c
     test_compress.c
     test_encrypt.c
+    test_oci.c
     # test_encrypt_integration.c  # Temporarily disabled due to API mismatches
     test_main.c
 )
@@ -46,6 +47,11 @@ if(BFC_WITH_SODIUM)
     target_compile_definitions(unit_tests PRIVATE BFC_WITH_SODIUM)
 endif()
 
+# Add OCI support if enabled (needed for OCI tests)
+if(BFC_WITH_OCI)
+    target_compile_definitions(unit_tests PRIVATE BFC_WITH_OCI)
+endif()
+
 target_include_directories(unit_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src/lib
@@ -61,5 +67,6 @@ add_test(NAME unit_util COMMAND unit_tests util)
 add_test(NAME unit_os COMMAND unit_tests os)
 add_test(NAME unit_compress COMMAND unit_tests compress)
 add_test(NAME unit_encrypt COMMAND unit_tests encrypt)
+add_test(NAME unit_oci COMMAND unit_tests oci)
 # add_test(NAME unit_encrypt_integration COMMAND unit_tests encrypt_integration)  # Disabled
 add_test(NAME unit_all COMMAND unit_tests)

@@ -1,4 +1,5 @@
 # Copyright 2021 zombocoder (Taras Havryliak)
+# Copyright 2024 Proxmox-LXCRI Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,10 +37,21 @@ if(BFC_WITH_SODIUM)
     target_include_directories(encrypt_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
 endif()
 
+# OCI example - demonstrates OCI image storage with BFC (requires OCI support)
+if(BFC_WITH_OCI)
+    add_executable(bfc_oci_example oci_example.c)
+    target_link_libraries(bfc_oci_example bfc)
+    target_include_directories(bfc_oci_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    target_compile_definitions(bfc_oci_example PRIVATE BFC_WITH_OCI=1)
+endif()
+
 # Configure optional dependencies for all examples
 set(all_example_targets create_example read_example extract_example)
 if(BFC_WITH_SODIUM)
     list(APPEND all_example_targets encrypt_example)
+endif()
+if(BFC_WITH_OCI)
+    list(APPEND all_example_targets bfc_oci_example)
 endif()
 
 # Link ZSTD if enabled (avoid duplicates by handling all targets together)
@@ -65,6 +77,9 @@ set(example_targets create_example read_example extract_example)
 if(BFC_WITH_SODIUM)
     list(APPEND example_targets encrypt_example)
 endif()
+if(BFC_WITH_OCI)
+    list(APPEND example_targets bfc_oci_example)
+endif()
 install(TARGETS ${example_targets}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/examples)
 
@@ -72,6 +87,9 @@ install(TARGETS ${example_targets}
 set(example_sources create_example.c read_example.c extract_example.c)
 if(BFC_WITH_SODIUM)
     list(APPEND example_sources encrypt_example.c)
+endif()
+if(BFC_WITH_OCI)
+    list(APPEND example_sources oci_example.c)
 endif()
 install(FILES 
         ${example_sources}
