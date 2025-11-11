@@ -414,7 +414,6 @@ int test_oci(void) {
 #else // BFC_WITH_OCI not defined
 
 int test_oci(void) {
-    printf("OCI tests skipped (BFC_WITH_OCI not enabled)\n");
     return 0;
 }
 
