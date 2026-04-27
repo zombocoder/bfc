@@ -167,7 +167,11 @@ static int test_binary_data(void) {
 
 static int test_alignment_cases(void) {
   // Test different alignment cases to exercise alignment handling
+#ifdef _MSC_VER
+  __declspec(align(16)) char aligned_data[32];
+#else
   char aligned_data[32] __attribute__((aligned(16)));
+#endif
   memset(aligned_data, 0xAA, sizeof(aligned_data));
 
   uint32_t crc_aligned = bfc_crc32c_compute(aligned_data, sizeof(aligned_data));
