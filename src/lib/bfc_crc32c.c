@@ -19,7 +19,11 @@
 #include <string.h>
 
 #if defined(__x86_64__) || defined(_M_X64)
+#ifdef _MSC_VER
+#include <intrin.h>
+#else
 #include <cpuid.h>
+#endif
 #include <immintrin.h>
 #define HAS_X86_64 1
 #elif defined(__aarch64__) || defined(_M_ARM64)
@@ -51,11 +55,17 @@ static void init_crc32c_table(void) {
 
 #ifdef HAS_X86_64
 static int detect_sse42_support(void) {
+#ifdef _MSC_VER
+  int cpu_info[4];
+  __cpuid(cpu_info, 1);
+  return (cpu_info[2] & (1 << 20)) != 0; // bit_SSE4_2 is bit 20 of ecx
+#else
   unsigned int eax, ebx, ecx, edx;
   if (__get_cpuid(1, &eax, &ebx, &ecx, &edx)) {
     return (ecx & bit_SSE4_2) != 0;
   }
   return 0;
+#endif
 }
 
 static uint32_t crc32c_hw_x86(uint32_t crc, const void* data, size_t len) {
@@ -65,7 +75,7 @@ static uint32_t crc32c_hw_x86(uint32_t crc, const void* data, size_t len) {
   while (len >= 8 && ((uintptr_t) ptr % 8) == 0) {
     uint64_t val;
     memcpy(&val, ptr, 8);
-    crc = _mm_crc32_u64(crc, val);
+    crc = (uint32_t)_mm_crc32_u64(crc, val);
     ptr += 8;
     len -= 8;
   }

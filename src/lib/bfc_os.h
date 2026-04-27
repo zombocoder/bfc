@@ -21,7 +21,7 @@
 #include <stdio.h>
 
 #ifdef _WIN32
-#include <windows.h>
+#include "bfc_win32_compat.h"
 #else
 #include <sys/types.h>
 #include <unistd.h>
