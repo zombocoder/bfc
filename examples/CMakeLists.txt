@@ -33,7 +33,10 @@ target_include_directories(extract_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
 if(BFC_WITH_SODIUM)
     add_executable(encrypt_example encrypt_example.c)
     target_link_libraries(encrypt_example bfc)
-    target_include_directories(encrypt_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    target_include_directories(encrypt_example PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src/lib
+    )
 endif()
 
 # Configure optional dependencies for all examples

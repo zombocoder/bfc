@@ -236,7 +236,7 @@ static int benchmark_mixed_workload(void)
             break;
 
         // Add subdirectory
-        char subdir_path[512];
+        char subdir_path[512 + 8];
         snprintf(subdir_path, sizeof(subdir_path), "%s/subdir", dir_path);
         result = bfc_add_dir(writer, subdir_path, 0755, 0);
         if (result != BFC_OK)
@@ -245,7 +245,7 @@ static int benchmark_mixed_workload(void)
         // Add files of varying sizes
         for (int file = 0; file < 20; file++)
         {
-            char file_path[512];
+            char file_path[512 + 16];
             snprintf(file_path, sizeof(file_path), "%s/file_%03d.txt", dir_path, file);
 
             // Vary file sizes: 1KB to 1MB

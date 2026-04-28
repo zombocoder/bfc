@@ -44,6 +44,12 @@ target_include_directories(bfc_cli PRIVATE
     ${CMAKE_SOURCE_DIR}/src/lib
 )
 
+# S_ISSOCK, S_ISVTX and other GNU extensions require _GNU_SOURCE on Linux glibc.
+# Defined via compile definitions so it precedes any system header inclusion.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(bfc_cli PRIVATE _GNU_SOURCE)
+endif()
+
 # Set output name to 'bfc' and directory
 set_target_properties(bfc_cli PROPERTIES 
     OUTPUT_NAME bfc
