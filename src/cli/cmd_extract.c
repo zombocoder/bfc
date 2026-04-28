@@ -270,7 +270,6 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
 static int extract_directory(const char* output_path, const bfc_entry_t* entry, int force) {
 #ifdef _WIN32
   (void) entry; // permissions and timestamps are POSIX-only
-#endif
   struct stat st;
   if (stat(output_path, &st) == 0) {
     if (!S_ISDIR(st.st_mode)) {
@@ -283,51 +282,75 @@ static int extract_directory(const char* output_path, const bfc_entry_t* entry, 
         return -1;
       }
     } else {
-// Directory already exists, just update permissions and timestamps via fd
-#ifndef _WIN32
-      int dirfd_ex = open(output_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
-      if (dirfd_ex >= 0) {
-        if (fchmod(dirfd_ex, entry->mode & 0777) != 0) {
-          print_verbose("Warning: cannot set permissions on '%s': %s", output_path,
-                        strerror(errno));
-        }
-        struct timespec times[2] = {
-            {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL},
-            {.tv_sec = entry->mtime_ns / 1000000000ULL,
-             .tv_nsec = entry->mtime_ns % 1000000000ULL}};
-        if (futimens(dirfd_ex, times) != 0) {
-          print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
-        }
-        close(dirfd_ex);
-      } else {
-        print_verbose("Warning: cannot open directory '%s' for metadata: %s", output_path,
-                      strerror(errno));
-      }
-#endif
-
       return 0;
     }
   }
 
-  // Create parent directories
   if (create_parent_directories(output_path, force) != 0) {
     return -1;
   }
 
   print_verbose("Creating directory: %s", output_path);
 
-  // Create directory
-#ifdef _WIN32
   if (mkdir(output_path) != 0) {
-#else
-  if (mkdir(output_path, entry->mode & 0777) != 0) {
-#endif
     print_error("Cannot create directory '%s': %s", output_path, strerror(errno));
     return -1;
   }
 
-// Set timestamps via fd to avoid TOCTOU
-#ifndef _WIN32
+  if (!g_options.quiet) {
+    printf("Created: %s/\n", output_path);
+  }
+
+  return 0;
+#else
+  // POSIX: use open() as the atomic probe — no preceding stat() to avoid TOCTOU.
+  int dirfd = open(output_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+  if (dirfd >= 0) {
+    // Directory exists — update permissions and timestamps via fd.
+    if (fchmod(dirfd, entry->mode & 0777) != 0) {
+      print_verbose("Warning: cannot set permissions on '%s': %s", output_path, strerror(errno));
+    }
+    struct timespec times[2] = {
+        {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL},
+        {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL}};
+    if (futimens(dirfd, times) != 0) {
+      print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
+    }
+    close(dirfd);
+    return 0;
+  }
+
+  int open_errno = errno;
+
+  if (open_errno == ENOTDIR || open_errno == ELOOP) {
+    // Path exists but is not a directory, or is a symlink (O_NOFOLLOW sets ELOOP).
+    if (!force) {
+      print_error("'%s' exists but is not a directory. Use -f to overwrite.", output_path);
+      return -1;
+    }
+    if (unlink(output_path) != 0) {
+      print_error("Cannot remove '%s': %s", output_path, strerror(errno));
+      return -1;
+    }
+    // fall through to create
+  } else if (open_errno != ENOENT) {
+    print_error("Cannot access '%s': %s", output_path, strerror(open_errno));
+    return -1;
+  }
+
+  // Create parent directories then the directory itself.
+  if (create_parent_directories(output_path, force) != 0) {
+    return -1;
+  }
+
+  print_verbose("Creating directory: %s", output_path);
+
+  if (mkdir(output_path, entry->mode & 0777) != 0) {
+    print_error("Cannot create directory '%s': %s", output_path, strerror(errno));
+    return -1;
+  }
+
+  // Set timestamps via fd.
   {
     int dirfd_new = open(output_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
     if (dirfd_new >= 0) {
@@ -340,12 +363,13 @@ static int extract_directory(const char* output_path, const bfc_entry_t* entry, 
       close(dirfd_new);
     }
   }
-#endif
+
   if (!g_options.quiet) {
     printf("Created: %s/\n", output_path);
   }
 
   return 0;
+#endif
 }
 
 static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* output_path,
