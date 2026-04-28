@@ -238,26 +238,25 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
     return -1;
   }
 
-  // Set file permissions and timestamps using file descriptor to avoid TOCTOU race conditions
-  #ifndef _WIN32
+// Set file permissions and timestamps using file descriptor to avoid TOCTOU race conditions
+#ifndef _WIN32
   if (fchmod(fd, entry->mode & 0777) != 0) {
     print_verbose("Warning: cannot set permissions on '%s': %s", output_path, strerror(errno));
   }
-  #endif
+#endif
 
+#ifndef _WIN32
+  struct timespec times[2] = {
+      {.tv_sec = entry->mtime_ns / 1000000000ULL,
+       .tv_nsec = entry->mtime_ns % 1000000000ULL}, // atime = mtime
+      {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL}
+      // mtime
+  };
 
-  #ifndef _WIN32
-    struct timespec times[2] = {
-        {.tv_sec = entry->mtime_ns / 1000000000ULL,
-         .tv_nsec = entry->mtime_ns % 1000000000ULL}, // atime = mtime
-        {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL}
-        // mtime
-    };
-
-    if (futimens(fd, times) != 0) {
-      print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
-    }
-  #endif
+  if (futimens(fd, times) != 0) {
+    print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
+  }
+#endif
   // Close file descriptor after setting metadata
   close(fd);
 
@@ -270,7 +269,7 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
 
 static int extract_directory(const char* output_path, const bfc_entry_t* entry, int force) {
 #ifdef _WIN32
-  (void)entry; // permissions and timestamps are POSIX-only
+  (void) entry; // permissions and timestamps are POSIX-only
 #endif
   struct stat st;
   if (stat(output_path, &st) == 0) {
@@ -284,27 +283,27 @@ static int extract_directory(const char* output_path, const bfc_entry_t* entry, 
         return -1;
       }
     } else {
-      // Directory already exists, just update permissions and timestamps via fd
-      #ifndef _WIN32
+// Directory already exists, just update permissions and timestamps via fd
+#ifndef _WIN32
       int dirfd_ex = open(output_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
       if (dirfd_ex >= 0) {
         if (fchmod(dirfd_ex, entry->mode & 0777) != 0) {
-          print_verbose("Warning: cannot set permissions on '%s': %s", output_path, strerror(errno));
+          print_verbose("Warning: cannot set permissions on '%s': %s", output_path,
+                        strerror(errno));
         }
         struct timespec times[2] = {
+            {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL},
             {.tv_sec = entry->mtime_ns / 1000000000ULL,
-             .tv_nsec = entry->mtime_ns % 1000000000ULL},
-            {.tv_sec = entry->mtime_ns / 1000000000ULL,
-             .tv_nsec = entry->mtime_ns % 1000000000ULL}
-        };
+             .tv_nsec = entry->mtime_ns % 1000000000ULL}};
         if (futimens(dirfd_ex, times) != 0) {
           print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
         }
         close(dirfd_ex);
       } else {
-        print_verbose("Warning: cannot open directory '%s' for metadata: %s", output_path, strerror(errno));
+        print_verbose("Warning: cannot open directory '%s' for metadata: %s", output_path,
+                      strerror(errno));
       }
-      #endif
+#endif
 
       return 0;
     }
@@ -327,24 +326,21 @@ static int extract_directory(const char* output_path, const bfc_entry_t* entry, 
     return -1;
   }
 
-  // Set timestamps via fd to avoid TOCTOU
-  #ifndef _WIN32
+// Set timestamps via fd to avoid TOCTOU
+#ifndef _WIN32
   {
     int dirfd_new = open(output_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
     if (dirfd_new >= 0) {
       struct timespec times[2] = {
-          {.tv_sec = entry->mtime_ns / 1000000000ULL,
-           .tv_nsec = entry->mtime_ns % 1000000000ULL},
-          {.tv_sec = entry->mtime_ns / 1000000000ULL,
-           .tv_nsec = entry->mtime_ns % 1000000000ULL}
-      };
+          {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL},
+          {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL}};
       if (futimens(dirfd_new, times) != 0) {
         print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
       }
       close(dirfd_new);
     }
   }
-  #endif
+#endif
   if (!g_options.quiet) {
     printf("Created: %s/\n", output_path);
   }
@@ -385,8 +381,8 @@ static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* 
   }
   target[entry->size] = '\0';
 
-  // Create symlink
-  #ifndef _WIN32
+// Create symlink
+#ifndef _WIN32
   if (symlink(target, output_path) != 0) {
     print_error("Cannot create symlink '%s' -> '%s': %s", output_path, target, strerror(errno));
     free(target);
@@ -405,11 +401,10 @@ static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* 
     print_verbose("Warning: cannot set timestamps on symlink '%s': %s", output_path,
                   strerror(errno));
   }
-  #else
-  (void)output_path;
+#else
+  (void) output_path;
   print_verbose("Warning: symlinks are not supported on Windows, skipping '%s'", entry->path);
-  #endif
-
+#endif
 
   if (!g_options.quiet) {
     printf("Extracted: %s -> %s\n", output_path, target);

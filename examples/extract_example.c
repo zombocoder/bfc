@@ -15,6 +15,7 @@
  */
 
 #define _GNU_SOURCE
+#include "../src/lib/bfc_os.h"
 #include <bfc.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -23,7 +24,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include "../src/lib/bfc_os.h"
 #ifndef _WIN32
 #include <unistd.h>
 #endif

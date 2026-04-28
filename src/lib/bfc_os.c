@@ -174,7 +174,7 @@ void* bfc_os_mmap(FILE* file, size_t size, size_t offset) {
   }
 
 #ifdef _WIN32
-  HANDLE hFile = (HANDLE)_get_osfhandle(_fileno(file));
+  HANDLE hFile = (HANDLE) _get_osfhandle(_fileno(file));
   if (hFile == INVALID_HANDLE_VALUE) {
     return NULL;
   }
@@ -184,8 +184,8 @@ void* bfc_os_mmap(FILE* file, size_t size, size_t offset) {
     return NULL;
   }
 
-  DWORD offsetLow = (DWORD)(offset & 0xFFFFFFFF);
-  DWORD offsetHigh = (DWORD)(offset >> 32);
+  DWORD offsetLow = (DWORD) (offset & 0xFFFFFFFF);
+  DWORD offsetHigh = (DWORD) (offset >> 32);
 
   void* addr = MapViewOfFile(hMapping, FILE_MAP_READ, offsetHigh, offsetLow, size);
   CloseHandle(hMapping); // Mapping handle is no longer needed after MapViewOfFile
@@ -366,7 +366,7 @@ int bfc_os_mkdir_p(const char* path, uint32_t mode) {
   }
 
 #ifdef _WIN32
-  (void)mode; // Windows _mkdir does not accept a mode argument
+  (void) mode; // Windows _mkdir does not accept a mode argument
 #endif
 
   char* path_copy = strdup(path);

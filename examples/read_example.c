@@ -15,6 +15,7 @@
  */
 
 #define _GNU_SOURCE
+#include "../src/lib/bfc_os.h"
 #include <bfc.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -22,7 +23,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
-#include "../src/lib/bfc_os.h"
 
 // Callback function for listing entries
 static int print_entry(const bfc_entry_t* entry, void* user) {

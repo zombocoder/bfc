@@ -24,7 +24,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include "bfc_os.h"
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -1041,8 +1040,8 @@ static int create_symlink_test_container(const char* filename) {
     return result;
   }
 
-  result = bfc_add_symlink(writer, "absolute_link", "absolute_target", 0755,
-                           bfc_os_current_time_ns());
+  result =
+      bfc_add_symlink(writer, "absolute_link", "absolute_target", 0755, bfc_os_current_time_ns());
   if (result != BFC_OK) {
     bfc_close(writer);
     return result;
