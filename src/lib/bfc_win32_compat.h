@@ -24,6 +24,7 @@
 #include <windows.h>
 #include <io.h>
 #include <direct.h>
+#include <process.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <winsock2.h>
