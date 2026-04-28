@@ -17,12 +17,15 @@
 #define _GNU_SOURCE
 #include <bfc.h>
 #include "benchmark_common.h"
+#include "../src/lib/bfc_os.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 // Generate compressible content (repeated patterns)
 static void generate_compressible_content(char *buffer, size_t size) {

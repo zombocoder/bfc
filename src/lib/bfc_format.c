@@ -22,8 +22,8 @@
 #include <time.h>
 
 #ifdef _WIN32
+#include "bfc_win32_compat.h"
 #include <bcrypt.h>
-#include <windows.h>
 #else
 #include <fcntl.h>
 #include <unistd.h>
