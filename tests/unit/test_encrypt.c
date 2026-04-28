@@ -383,7 +383,11 @@ static int test_end_to_end_encryption(void) {
   assert(entry.enc == BFC_ENC_CHACHA20_POLY1305);
 
   // Extract with correct password
+#ifdef _WIN32
+  out_fd = open(extract_filename, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
+#else
   out_fd = open(extract_filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
   assert(out_fd >= 0);
 
   result = bfc_extract_to_fd(reader, "secret_file.txt", out_fd);

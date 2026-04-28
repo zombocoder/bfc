@@ -17,6 +17,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <crtdbg.h>
+#endif
 
 // Test declarations
 int test_format(void);
@@ -65,6 +68,12 @@ static int run_test(const char* name, int (*func)(void)) {
 
 int main(int argc, char* argv[]) {
   int failed = 0;
+
+#ifdef _WIN32
+  /* Suppress assert dialogs on CI - print to stderr and continue */
+  _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+  _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+#endif
 
   if (argc == 2) {
     // Run specific test
