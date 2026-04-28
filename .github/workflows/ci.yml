@@ -45,21 +45,16 @@ jobs:
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          # Install vcpkg dependencies
           vcpkg install zstd:x64-windows libsodium:x64-windows
-          # Visual Studio Build Tools are already available
+          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
 
-      - name: Set up environment
+      - name: Set up environment (non-Windows)
+        if: matrix.os != 'windows-latest'
         run: |
           echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
           echo "CXX=${{ matrix.cxx }}" >> $GITHUB_ENV
 
-      - name: Configure CMake (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: cmd
-        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DBFC_WITH_ZSTD=ON -DBFC_WITH_SODIUM=ON
-
-      - name: Configure CMake (Unix)
+      - name: Configure CMake (non-Windows)
         if: matrix.os != 'windows-latest'
         run: |
           cmake -B build \
@@ -69,29 +64,32 @@ jobs:
             -DBFC_WITH_ZSTD=ON \
             -DBFC_WITH_SODIUM=ON
 
-      - name: Build (Windows)
+      - name: Configure CMake (Windows)
         if: matrix.os == 'windows-latest'
-        shell: cmd
-        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+        run: |
+          cmake -B build `
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DBFC_WITH_ZSTD=ON `
+            -DBFC_WITH_SODIUM=ON `
+            -DBFC_BUILD_BENCHMARKS=OFF
 
-      - name: Build (Unix)
+      - name: Build (non-Windows)
         if: matrix.os != 'windows-latest'
         run: cmake --build build --config ${{ matrix.build_type }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
-      - name: Run tests (Windows)
-        if: matrix.build_type == 'Debug' && matrix.os == 'windows-latest'
-        shell: cmd
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: cmake --build build --config ${{ matrix.build_type }} -j4
+
+      - name: Run tests
+        if: matrix.build_type == 'Debug'
         run: |
           cd build
-          ctest --output-on-failure --parallel --config ${{ matrix.build_type }}
+          ctest --output-on-failure -C ${{ matrix.build_type }} --parallel 4
 
-      - name: Run tests (Unix)
-        if: matrix.build_type == 'Debug' && matrix.os != 'windows-latest'
-        run: |
-          cd build
-          ctest --output-on-failure --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu)
-
-      - name: Test CLI functionality
+      - name: Test CLI functionality (Unix)
         if: matrix.os != 'windows-latest'
         run: |
           # Create test data
@@ -247,6 +245,64 @@ jobs:
           # Clean up
           rm -rf test.bfc test_data test_compressed.bfc test_fast.bfc test_balanced.bfc
           rm -rf test_encrypted.bfc test_keyfile.bfc test_enc_comp.bfc test.key
+
+      - name: Test CLI functionality (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          # Create test data
+          New-Item -ItemType Directory -Force test_data\subdir | Out-Null
+          "Hello World" | Out-File -Encoding utf8 test_data\hello.txt
+          "Goodbye" | Out-File -Encoding utf8 test_data\bye.txt
+          "Nested file" | Out-File -Encoding utf8 test_data\subdir\nested.txt
+
+          # Locate the built binary (Debug or Release subfolder under bin)
+          $bfc = Get-ChildItem -Recurse build\bin -Filter bfc.exe | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $bfc) { Write-Error "bfc.exe not found"; exit 1 }
+
+          # Basic CLI workflow
+          & $bfc create test.bfc test_data\
+          & $bfc list test.bfc
+          & $bfc info test.bfc
+          & $bfc verify test.bfc
+          & $bfc verify --deep test.bfc
+
+          # Compression
+          & $bfc create -c zstd test_compressed.bfc test_data\
+          & $bfc info test_compressed.bfc test_data\hello.txt
+          & $bfc verify test_compressed.bfc
+
+          # Extraction
+          New-Item -ItemType Directory -Force extract_test | Out-Null
+          Push-Location extract_test
+          & $bfc extract ..\test.bfc
+          if (Test-Path hello.txt) { Write-Output "hello.txt extracted" }
+          if (Test-Path bye.txt)   { Write-Output "bye.txt extracted" }
+          if (Test-Path subdir\nested.txt) { Write-Output "nested.txt extracted" }
+          Pop-Location
+          Remove-Item -Recurse -Force extract_test
+
+          # Encryption
+          & $bfc create -e testpassword123 test_encrypted.bfc test_data\
+          & $bfc info test_encrypted.bfc
+          New-Item -ItemType Directory -Force extract_encrypted | Out-Null
+          Push-Location extract_encrypted
+          & $bfc extract -p testpassword123 ..\test_encrypted.bfc
+          if (Test-Path hello.txt) { Write-Output "hello.txt extracted from encrypted container" }
+          Pop-Location
+          Remove-Item -Recurse -Force extract_encrypted
+
+          # Wrong password should fail
+          New-Item -ItemType Directory -Force extract_fail | Out-Null
+          Push-Location extract_fail
+          $result = & $bfc extract -p wrongpassword ..\test_encrypted.bfc 2>&1; $ec = $LASTEXITCODE
+          if ($ec -ne 0) { Write-Output "Correctly failed with wrong password" }
+          Pop-Location
+          Remove-Item -Recurse -Force extract_fail
+
+          # Clean up
+          Remove-Item -Force test.bfc, test_data -Recurse -ErrorAction SilentlyContinue
+          Remove-Item -Force test_compressed.bfc, test_encrypted.bfc -ErrorAction SilentlyContinue
 
       - name: Run benchmarks
         if: matrix.os != 'windows-latest'

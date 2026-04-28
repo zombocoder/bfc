@@ -17,12 +17,15 @@
 #define _GNU_SOURCE
 #include <bfc.h>
 #include "benchmark_common.h"
+#include "../src/lib/bfc_os.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 // Create a test container for reading benchmarks
 static int create_test_container(const char *container, int num_files, size_t file_size)

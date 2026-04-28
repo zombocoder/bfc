@@ -16,3 +16,6 @@
 
 // Placeholder implementation - iterator functionality to be implemented
 // This will contain directory iteration and prefix matching logic
+
+// Suppress MSVC C4206: nonstandard extension used: translation unit is empty
+typedef int bfc_iter_placeholder_t;

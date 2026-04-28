@@ -23,7 +23,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include "../src/lib/bfc_os.h"
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 // Callback to collect all file entries for extraction
 struct extract_context {

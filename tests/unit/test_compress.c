@@ -22,7 +22,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "bfc_os.h"
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 // Test basic compression support detection
 static int test_compression_support(void) {
@@ -219,7 +222,7 @@ static int test_compression_utilities(void) {
 
 // Test BFC writer compression settings
 static int test_writer_compression_settings(void) {
-  const char* filename = "/tmp/test_compression_writer.bfc";
+  const char* filename = "test_compression_writer.bfc";
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -255,9 +258,9 @@ static int test_writer_compression_settings(void) {
 
 // Test end-to-end compression with BFC container
 static int test_end_to_end_compression(void) {
-  const char* container_filename = "/tmp/test_e2e_compression.bfc";
-  const char* test_filename = "/tmp/test_e2e_input.txt";
-  const char* extract_filename = "/tmp/test_e2e_output.txt";
+  const char* container_filename = "test_e2e_compression.bfc";
+  const char* test_filename = "test_e2e_input.txt";
+  const char* extract_filename = "test_e2e_output.txt";
 
   // Clean up any existing files
   unlink(container_filename);
@@ -265,7 +268,7 @@ static int test_end_to_end_compression(void) {
   unlink(extract_filename);
 
   // Create test input file with compressible content
-  FILE* input_file = fopen(test_filename, "w");
+  FILE* input_file = fopen(test_filename, "wb");
   assert(input_file != NULL);
 
   const char* repeating_content =
@@ -321,7 +324,11 @@ static int test_end_to_end_compression(void) {
 #endif
 
   // Extract and verify content
+#ifdef _WIN32
+  int out_fd = open(extract_filename, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
+#else
   int out_fd = open(extract_filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
   assert(out_fd >= 0);
 
   result = bfc_extract_to_fd(reader, "test_file.txt", out_fd);
@@ -368,11 +375,12 @@ static int test_end_to_end_compression(void) {
 
 // Test additional compression edge cases for better coverage
 static int test_compression_edge_cases(void) {
-  const char* filename = "/tmp/compress_edge_test.bfc";
-  const char* test_filename = "/tmp/compress_edge_input.txt";
+#ifdef BFC_WITH_ZSTD
+  const char* filename = "compress_edge_test.bfc";
+  const char* test_filename = "compress_edge_input.txt";
 
   // Create a small file that won't be compressed (below threshold)
-  FILE* f = fopen(test_filename, "w");
+  FILE* f = fopen(test_filename, "wb");
   assert(f);
   fprintf(f, "tiny"); // 4 bytes, below default 64-byte threshold
   fclose(f);
@@ -414,7 +422,7 @@ static int test_compression_edge_cases(void) {
   unlink(filename);
 
   // Create larger file that will be compressed
-  f = fopen(test_filename, "w");
+  f = fopen(test_filename, "wb");
   assert(f);
   for (int i = 0; i < 100; i++) {
     fprintf(f, "This is a repeating line %d that should compress well with zstd compression.\n", i);
@@ -467,17 +475,18 @@ static int test_compression_edge_cases(void) {
   // Clean up
   unlink(filename);
   unlink(test_filename);
-
+#endif // BFC_WITH_ZSTD
   return 0;
 }
 
 // Test compression threshold settings
 static int test_compression_threshold_settings(void) {
-  const char* filename = "/tmp/compress_threshold_test.bfc";
-  const char* test_filename = "/tmp/compress_threshold_input.txt";
+#ifdef BFC_WITH_ZSTD
+  const char* filename = "compress_threshold_test.bfc";
+  const char* test_filename = "compress_threshold_input.txt";
 
   // Create a file that's exactly at the threshold
-  FILE* f = fopen(test_filename, "w");
+  FILE* f = fopen(test_filename, "wb");
   assert(f);
   for (int i = 0; i < 64; i++) { // Exactly 64 bytes
     fputc('A', f);
@@ -520,7 +529,7 @@ static int test_compression_threshold_settings(void) {
   // Clean up
   unlink(filename);
   unlink(test_filename);
-
+#endif // BFC_WITH_ZSTD
   return 0;
 }
 

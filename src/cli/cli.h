@@ -19,6 +19,10 @@
 
 #include <bfc.h>
 
+#ifdef _WIN32
+#include "cli_win32_compat.h"
+#endif
+
 // Command handler function type
 typedef int (*cmd_handler_t)(int argc, char* argv[]);
 

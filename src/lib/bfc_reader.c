@@ -25,12 +25,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#ifdef _WIN32
-#include <io.h>
-#define access _access
-#else
-#include <unistd.h>
-#endif
 
 #define READ_BUFFER_SIZE 65536
 
@@ -497,7 +491,7 @@ static size_t read_compressed_file(bfc_t* r, bfc_reader_entry_t* entry, uint64_t
 
   // Decompress the data
   bfc_decompress_result_t decomp_result =
-      bfc_decompress_data(entry->comp, data_to_decompress, data_size, obj_hdr.orig_size);
+      bfc_decompress_data((uint8_t)entry->comp, data_to_decompress, data_size, obj_hdr.orig_size);
 
   // Clean up
   free(raw_data);
@@ -572,7 +566,7 @@ size_t bfc_read(bfc_t* r, const char* container_path, uint64_t offset, void* buf
 
   // Handle compressed files
   if (entry->comp != BFC_COMP_NONE) {
-    if (!bfc_compress_is_supported(entry->comp)) {
+    if (!bfc_compress_is_supported((uint8_t)entry->comp)) {
       return 0; // Unsupported compression type
     }
 
@@ -644,14 +638,14 @@ int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd) {
   size_t hdr_name_size = sizeof(obj_hdr) + name_len;
   size_t padding = bfc_padding_size(hdr_name_size, BFC_ALIGN);
 
-  if (fseek(r->file, name_len + padding, SEEK_CUR) != 0) {
+  if (fseek(r->file, (long)(name_len + padding), SEEK_CUR) != 0) {
     return BFC_E_IO;
   }
 
   // Handle compressed vs uncompressed files
   if (entry->comp != BFC_COMP_NONE) {
     // Compressed file - decompress and write
-    if (!bfc_compress_is_supported(entry->comp)) {
+    if (!bfc_compress_is_supported((uint8_t)entry->comp)) {
       return BFC_E_INVAL;
     }
 
@@ -680,8 +674,8 @@ int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd) {
 
       // Create decryption key structure using stored key
       bfc_encrypt_key_t decrypt_key;
-      int result = bfc_encrypt_key_from_bytes(r->encryption_key, &decrypt_key);
-      if (result != BFC_OK) {
+      int enc_err = bfc_encrypt_key_from_bytes(r->encryption_key, &decrypt_key);
+      if (enc_err != BFC_OK) {
         free(compressed_data);
         return BFC_E_IO;
       }
@@ -704,7 +698,7 @@ int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd) {
 
     // Decompress
     bfc_decompress_result_t decomp_result =
-        bfc_decompress_data(entry->comp, data_to_decompress, data_size, obj_hdr.orig_size);
+        bfc_decompress_data((uint8_t)entry->comp, data_to_decompress, data_size, obj_hdr.orig_size);
 
     // Clean up
     free(compressed_data);
@@ -734,7 +728,7 @@ int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd) {
     }
 
     // Write decompressed data to output
-    ssize_t written = write(out_fd, decomp_result.data, decomp_result.decompressed_size);
+    ssize_t written = write(out_fd, decomp_result.data, (unsigned int)decomp_result.decompressed_size);
     free(decomp_result.data);
 
     if (written != (ssize_t) decomp_result.decompressed_size) {
@@ -762,8 +756,8 @@ int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd) {
 
       // Create decryption key structure
       bfc_encrypt_key_t decrypt_key;
-      int result = bfc_encrypt_key_from_bytes(r->encryption_key, &decrypt_key);
-      if (result != BFC_OK) {
+      int enc_err = bfc_encrypt_key_from_bytes(r->encryption_key, &decrypt_key);
+      if (enc_err != BFC_OK) {
         free(encrypted_data);
         return BFC_E_IO;
       }
@@ -790,7 +784,7 @@ int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd) {
       }
 
       // Write decrypted data to output
-      ssize_t written = write(out_fd, decrypt_result.data, decrypt_result.decrypted_size);
+      ssize_t written = write(out_fd, decrypt_result.data, (unsigned int)decrypt_result.decrypted_size);
       free(decrypt_result.data);
 
       if (written != (ssize_t) decrypt_result.decrypted_size) {
@@ -811,7 +805,7 @@ int bfc_extract_to_fd(bfc_t* r, const char* container_path, int out_fd) {
           return BFC_E_IO;
         }
 
-        if (write(out_fd, buffer, bytes_read) != (ssize_t) bytes_read) {
+        if (write(out_fd, buffer, (unsigned int)bytes_read) != (ssize_t) bytes_read) {
           return BFC_E_IO;
         }
 
@@ -866,7 +860,7 @@ int bfc_verify(bfc_t* r, int deep) {
         size_t hdr_name_size = sizeof(obj_hdr) + name_len;
         size_t padding = bfc_padding_size(hdr_name_size, BFC_ALIGN);
 
-        if (fseek(r->file, name_len + padding, SEEK_CUR) != 0) {
+        if (fseek(r->file, (long)(name_len + padding), SEEK_CUR) != 0) {
           return BFC_E_IO;
         }
 

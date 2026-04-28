@@ -165,14 +165,29 @@ int64_t bfc_os_tell(FILE* file) {
 }
 
 void* bfc_os_mmap(FILE* file, size_t size, size_t offset) {
-#ifdef _WIN32
-  // Windows memory mapping not implemented in v1
-  return NULL;
-#else
   if (!file || size == 0) {
     return NULL;
   }
 
+#ifdef _WIN32
+  HANDLE hFile = (HANDLE)_get_osfhandle(_fileno(file));
+  if (hFile == INVALID_HANDLE_VALUE) {
+    return NULL;
+  }
+
+  HANDLE hMapping = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+  if (hMapping == NULL) {
+    return NULL;
+  }
+
+  DWORD offsetLow = (DWORD)(offset & 0xFFFFFFFF);
+  DWORD offsetHigh = (DWORD)(offset >> 32);
+
+  void* addr = MapViewOfFile(hMapping, FILE_MAP_READ, offsetHigh, offsetLow, size);
+  CloseHandle(hMapping); // Mapping handle is no longer needed after MapViewOfFile
+
+  return addr;
+#else
   int fd = fileno(file);
   void* addr = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, (off_t) offset);
   return (addr == MAP_FAILED) ? NULL : addr;
@@ -180,13 +195,13 @@ void* bfc_os_mmap(FILE* file, size_t size, size_t offset) {
 }
 
 int bfc_os_munmap(void* addr, size_t size) {
-#ifdef _WIN32
-  return BFC_E_INVAL;
-#else
   if (!addr || size == 0) {
     return BFC_E_INVAL;
   }
 
+#ifdef _WIN32
+  return UnmapViewOfFile(addr) ? BFC_OK : BFC_E_IO;
+#else
   return munmap(addr, size) == 0 ? BFC_OK : BFC_E_IO;
 #endif
 }
@@ -345,6 +360,10 @@ int bfc_os_mkdir_p(const char* path, uint32_t mode) {
   if (!path) {
     return BFC_E_INVAL;
   }
+
+#ifdef _WIN32
+  (void)mode; // Windows _mkdir does not accept a mode argument
+#endif
 
   char* path_copy = strdup(path);
   if (!path_copy) {

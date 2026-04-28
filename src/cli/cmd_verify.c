@@ -110,7 +110,8 @@ static int verify_progress_callback(const bfc_entry_t* entry, void* user) {
   return 0;
 }
 
-__attribute__((unused)) static int verify_entry_callback(const bfc_entry_t* entry, void* user) {
+static int verify_entry_callback(const bfc_entry_t* entry, void* user)
+ {
   verify_progress_t* ctx = (verify_progress_t*) user;
 
   ctx->verified_entries++;
