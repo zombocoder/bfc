@@ -18,87 +18,88 @@
 
 #ifdef _WIN32
 
+#include "../lib/bfc_win32_compat.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
-#include "../lib/bfc_win32_compat.h"
 
 // dirname replacement
 static char* dirname(char* path) {
-    static char buffer[MAX_PATH];
-    if (!path || !*path) {
-        strcpy(buffer, ".");
-        return buffer;
-    }
-    
-    char* last_slash = strrchr(path, '/');
-    char* last_backslash = strrchr(path, '\\');
-    char* sep = (last_slash > last_backslash) ? last_slash : last_backslash;
-
-    if (!sep) {
-        strcpy(buffer, ".");
-    } else if (sep == path) {
-        strcpy(buffer, "/");
-    } else {
-        size_t len = sep - path;
-        if (len >= MAX_PATH) len = MAX_PATH - 1;
-        strncpy(buffer, path, len);
-        buffer[len] = '\0';
-    }
+  static char buffer[MAX_PATH];
+  if (!path || !*path) {
+    strcpy(buffer, ".");
     return buffer;
+  }
+
+  char* last_slash = strrchr(path, '/');
+  char* last_backslash = strrchr(path, '\\');
+  char* sep = (last_slash > last_backslash) ? last_slash : last_backslash;
+
+  if (!sep) {
+    strcpy(buffer, ".");
+  } else if (sep == path) {
+    strcpy(buffer, "/");
+  } else {
+    size_t len = sep - path;
+    if (len >= MAX_PATH)
+      len = MAX_PATH - 1;
+    strncpy(buffer, path, len);
+    buffer[len] = '\0';
+  }
+  return buffer;
 }
 
 // POSIX function mappings for Windows
 #define chdir _chdir
 #define lstat stat
-#define symlink(target, linkpath) (-1) // Not supported for now
-#define lutimes(path, tv) (0) // Stub
-#define futimens(fd, ts) (0) // Stub
+#define symlink(target, linkpath) (-1)        // Not supported for now
+#define lutimes(path, tv) (0)                 // Stub
+#define futimens(fd, ts) (0)                  // Stub
 #define utimensat(dirfd, path, ts, flags) (0) // Stub
-#define fchmod(fd, mode) (0) // Stub
+#define fchmod(fd, mode) (0)                  // Stub
 #define chmod _chmod
 
 // dirent.h basic replacement for Windows
 typedef struct dirent {
-    char d_name[MAX_PATH];
+  char d_name[MAX_PATH];
 } dirent_t;
 
 typedef struct DIR {
-    HANDLE hFind;
-    WIN32_FIND_DATA findData;
-    struct dirent ent;
-    int first;
+  HANDLE hFind;
+  WIN32_FIND_DATA findData;
+  struct dirent ent;
+  int first;
 } DIR;
 
 static DIR* opendir(const char* name) {
-    DIR* dir = (DIR*)malloc(sizeof(DIR));
-    char searchPath[MAX_PATH];
-    snprintf(searchPath, MAX_PATH, "%s/*", name);
-    dir->hFind = FindFirstFile(searchPath, &dir->findData);
-    if (dir->hFind == INVALID_HANDLE_VALUE) {
-        free(dir);
-        return NULL;
-    }
-    dir->first = 1;
-    return dir;
+  DIR* dir = (DIR*) malloc(sizeof(DIR));
+  char searchPath[MAX_PATH];
+  snprintf(searchPath, MAX_PATH, "%s/*", name);
+  dir->hFind = FindFirstFile(searchPath, &dir->findData);
+  if (dir->hFind == INVALID_HANDLE_VALUE) {
+    free(dir);
+    return NULL;
+  }
+  dir->first = 1;
+  return dir;
 }
 
 static struct dirent* readdir(DIR* dir) {
-    if (dir->first) {
-        dir->first = 0;
-    } else {
-        if (!FindNextFile(dir->hFind, &dir->findData)) {
-            return NULL;
-        }
+  if (dir->first) {
+    dir->first = 0;
+  } else {
+    if (!FindNextFile(dir->hFind, &dir->findData)) {
+      return NULL;
     }
-    strncpy(dir->ent.d_name, dir->findData.cFileName, MAX_PATH);
-    return &dir->ent;
+  }
+  strncpy(dir->ent.d_name, dir->findData.cFileName, MAX_PATH);
+  return &dir->ent;
 }
 
 static int closedir(DIR* dir) {
-    FindClose(dir->hFind);
-    free(dir);
-    return 0;
+  FindClose(dir->hFind);
+  free(dir);
+  return 0;
 }
 
 #endif // _WIN32

@@ -21,21 +21,21 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <windows.h>
-#include <io.h>
 #include <direct.h>
+#include <io.h>
 #include <process.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <winsock2.h>
 #include <time.h>
+#include <windows.h>
+#include <winsock2.h>
 
 #if defined(_MSC_VER) && _MSC_VER < 1900
 #ifndef _TIMESPEC_DEFINED
 #define _TIMESPEC_DEFINED
 struct timespec {
-    time_t tv_sec;
-    long tv_nsec;
+  time_t tv_sec;
+  long tv_nsec;
 };
 #endif
 #endif
@@ -108,9 +108,7 @@ typedef ptrdiff_t ssize_t;
 #endif
 
 // usleep replacement
-static inline void usleep(unsigned long usec) {
-    Sleep(usec / 1000);
-}
+static inline void usleep(unsigned long usec) { Sleep(usec / 1000); }
 
 #define sleep(seconds) Sleep((seconds) * 1000)
 
@@ -125,16 +123,16 @@ static inline void usleep(unsigned long usec) {
 typedef int clockid_t;
 
 static inline int clock_gettime(clockid_t clk_id, struct timespec* tp) {
-    (void)clk_id;
-    FILETIME ft;
-    uint64_t tim;
-    GetSystemTimeAsFileTime(&ft);
-    tim = ft.dwLowDateTime;
-    tim |= ((uint64_t)ft.dwHighDateTime) << 32;
-    tim -= 116444736000000000ULL; // 1601 to 1970
-    tp->tv_sec = (time_t)(tim / 10000000ULL);
-    tp->tv_nsec = (long)((tim % 10000000ULL) * 100ULL);
-    return 0;
+  (void) clk_id;
+  FILETIME ft;
+  uint64_t tim;
+  GetSystemTimeAsFileTime(&ft);
+  tim = ft.dwLowDateTime;
+  tim |= ((uint64_t) ft.dwHighDateTime) << 32;
+  tim -= 116444736000000000ULL; // 1601 to 1970
+  tp->tv_sec = (time_t) (tim / 10000000ULL);
+  tp->tv_nsec = (long) ((tim % 10000000ULL) * 100ULL);
+  return 0;
 }
 
 // Map mkdir to _mkdir

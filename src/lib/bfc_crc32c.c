@@ -75,7 +75,7 @@ static uint32_t crc32c_hw_x86(uint32_t crc, const void* data, size_t len) {
   while (len >= 8 && ((uintptr_t) ptr % 8) == 0) {
     uint64_t val;
     memcpy(&val, ptr, 8);
-    crc = (uint32_t)_mm_crc32_u64(crc, val);
+    crc = (uint32_t) _mm_crc32_u64(crc, val);
     ptr += 8;
     len -= 8;
   }

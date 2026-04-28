@@ -299,14 +299,13 @@ static int process_directory_entry(bfc_t* writer, const char* base_path, const c
   } else if (S_ISDIR(st.st_mode)) {
     return add_directory_to_container(writer, full_path, container_path);
   } else if (S_ISLNK(st.st_mode)) {
-  #ifndef _WIN32
+#ifndef _WIN32
     return add_symlink_to_container(writer, full_path, container_path);
-  #else
+#else
     print_verbose("Skipping symlink on Windows: %s", full_path);
     return 0;
-  #endif
-  }
- else {
+#endif
+  } else {
     print_verbose("Skipping special file: %s", full_path);
     return 0;
   }
@@ -497,16 +496,15 @@ int cmd_create(int argc, char* argv[]) {
         return 1;
       }
     } else if (S_ISLNK(st.st_mode)) {
-    #ifndef _WIN32
+#ifndef _WIN32
       if (add_symlink_to_container(writer, input_path, basename) != 0) {
         bfc_close(writer);
         return 1;
       }
-    #else
+#else
       print_verbose("Skipping symlink on Windows: %s", input_path);
-    #endif
-    }
- else {
+#endif
+    } else {
       print_error("'%s' is not a regular file, directory, or symlink", input_path);
       bfc_close(writer);
       return 1;
