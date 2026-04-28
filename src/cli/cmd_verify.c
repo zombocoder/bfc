@@ -110,7 +110,13 @@ static int verify_progress_callback(const bfc_entry_t* entry, void* user) {
   return 0;
 }
 
+#ifdef _MSC_VER
+#pragma warning(suppress : 4505)
 static int verify_entry_callback(const bfc_entry_t* entry, void* user)
+#else
+static int verify_entry_callback(const bfc_entry_t* entry, void* user) __attribute__((unused));
+static int verify_entry_callback(const bfc_entry_t* entry, void* user)
+#endif
  {
   verify_progress_t* ctx = (verify_progress_t*) user;
 

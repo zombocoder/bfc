@@ -146,4 +146,7 @@ static inline int clock_gettime(clockid_t clk_id, struct timespec* tp) {
 // Map fileno to _fileno
 #define fileno _fileno
 
+// Map getpid to _getpid
+#define getpid _getpid
+
 #endif // _WIN32

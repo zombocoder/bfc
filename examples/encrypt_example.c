@@ -35,7 +35,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 // Extraction context for callback
 typedef struct {

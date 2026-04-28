@@ -21,6 +21,8 @@
 
 #ifdef _WIN32
 #include "cli_win32_compat.h"
+#else
+#include <sys/stat.h>
 #endif
 
 // Command handler function type
