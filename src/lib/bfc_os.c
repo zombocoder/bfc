@@ -15,6 +15,10 @@
  */
 
 #define _GNU_SOURCE
+/* fdatasync requires _DARWIN_C_SOURCE on macOS clang */
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE
+#endif
 #include "bfc_os.h"
 #include <bfc.h>
 #include <errno.h>
