@@ -22,6 +22,9 @@
 #ifdef _WIN32
 #include "cli_win32_compat.h"
 #else
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <sys/stat.h>
 #endif
 
