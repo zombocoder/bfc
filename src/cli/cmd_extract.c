@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#define _GNU_SOURCE
 #include "cli.h"
 #ifndef _WIN32
 #include <libgen.h>

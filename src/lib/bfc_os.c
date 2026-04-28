@@ -15,10 +15,6 @@
  */
 
 #define _GNU_SOURCE
-/* fdatasync requires _DARWIN_C_SOURCE on macOS clang */
-#ifdef __APPLE__
-#define _DARWIN_C_SOURCE
-#endif
 #include "bfc_os.h"
 #include <bfc.h>
 #include <errno.h>
@@ -91,6 +87,10 @@ int bfc_os_sync(FILE* file) {
 #ifdef _WIN32
   int fd = _fileno(file);
   return _commit(fd) == 0 ? BFC_OK : BFC_E_IO;
+#elif defined(__APPLE__)
+  /* fdatasync availability is unreliable on macOS; fsync is equivalent */
+  int fd = fileno(file);
+  return fsync(fd) == 0 ? BFC_OK : BFC_E_IO;
 #else
   int fd = fileno(file);
   return fdatasync(fd) == 0 ? BFC_OK : BFC_E_IO;
