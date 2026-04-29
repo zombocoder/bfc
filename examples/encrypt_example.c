@@ -30,7 +30,7 @@
 
 #include <bfc.h>
 #ifdef _WIN32
-#include "bfc_win32_compat.h"
+#include <bfc_win32_compat.h>
 #else
 #include <unistd.h>
 #endif
