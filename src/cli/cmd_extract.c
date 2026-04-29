@@ -426,7 +426,6 @@ static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* 
                   strerror(errno));
   }
 #else
-  (void) output_path;
   print_verbose("Warning: symlinks are not supported on Windows, skipping '%s'", entry->path);
 #endif
 
