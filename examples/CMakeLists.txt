@@ -20,14 +20,20 @@ target_link_libraries(create_example bfc)
 target_include_directories(create_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 # Read example - demonstrates container reading and listing
-add_executable(read_example read_example.c)  
+add_executable(read_example read_example.c)
 target_link_libraries(read_example bfc)
-target_include_directories(read_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(read_example PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src/lib
+)
 
 # Extract example - demonstrates file extraction
 add_executable(extract_example extract_example.c)
 target_link_libraries(extract_example bfc)
-target_include_directories(extract_example PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(extract_example PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src/lib
+)
 
 # Encrypt example - demonstrates encryption/decryption (requires libsodium)
 if(BFC_WITH_SODIUM)

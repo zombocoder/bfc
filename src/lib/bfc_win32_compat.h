@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 Gemini CLI
+ * Copyright 2021 zombocoder (Taras Havryliak)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,17 +28,6 @@
 #include <sys/types.h>
 #include <time.h>
 #include <windows.h>
-#include <winsock2.h>
-
-#if defined(_MSC_VER) && _MSC_VER < 1900
-#ifndef _TIMESPEC_DEFINED
-#define _TIMESPEC_DEFINED
-struct timespec {
-  time_t tv_sec;
-  long tv_nsec;
-};
-#endif
-#endif
 
 // Missing POSIX types
 typedef ptrdiff_t ssize_t;
@@ -123,7 +112,15 @@ static inline void usleep(unsigned long usec) { Sleep(usec / 1000); }
 typedef int clockid_t;
 
 static inline int clock_gettime(clockid_t clk_id, struct timespec* tp) {
-  (void) clk_id;
+  if (clk_id == CLOCK_MONOTONIC) {
+    LARGE_INTEGER counter, freq;
+    QueryPerformanceCounter(&counter);
+    QueryPerformanceFrequency(&freq);
+    tp->tv_sec = (time_t) (counter.QuadPart / freq.QuadPart);
+    tp->tv_nsec = (long) (((counter.QuadPart % freq.QuadPart) * 1000000000LL) / freq.QuadPart);
+    return 0;
+  }
+  // CLOCK_REALTIME and any other clock id: wall-clock from FILETIME.
   FILETIME ft;
   uint64_t tim;
   GetSystemTimeAsFileTime(&ft);

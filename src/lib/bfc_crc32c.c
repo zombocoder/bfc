@@ -55,7 +55,7 @@ static void init_crc32c_table(void) {
 
 #ifdef HAS_X86_64
 static int detect_sse42_support(void) {
-#if defined(_MSC_VER) || defined(_WIN32)
+#ifdef _MSC_VER
   int cpu_info[4];
   __cpuid(cpu_info, 1);
   return (cpu_info[2] & (1 << 20)) != 0; // SSE4.2 is bit 20 of ecx

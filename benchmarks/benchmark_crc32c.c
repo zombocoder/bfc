@@ -15,9 +15,9 @@
  */
 
 #define _GNU_SOURCE
+#include <bfc_os.h>
 #include "bfc_crc32c.h"
 #include "benchmark_common.h"
-#include "../src/lib/bfc_os.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

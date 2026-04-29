@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
+#include <bfc_os.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../src/lib/bfc_os.h"
+#include <time.h>
 #ifndef _WIN32
 #include <sys/utsname.h>
 #include <unistd.h>
 #endif
-#include <time.h>
 
 // External benchmark functions
 extern int benchmark_crc32c_main(void);

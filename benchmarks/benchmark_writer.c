@@ -16,8 +16,8 @@
 
 #define _GNU_SOURCE
 #include <bfc.h>
+#include <bfc_os.h>
 #include "benchmark_common.h"
-#include "../src/lib/bfc_os.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -228,7 +228,7 @@ static int benchmark_mixed_workload(void)
     // Create directory structure with files
     for (int dir = 0; dir < 50; dir++)
     {
-        char dir_path[512];
+        char dir_path[32];
         snprintf(dir_path, sizeof(dir_path), "dir_%03d", dir);
 
         result = bfc_add_dir(writer, dir_path, 0755, 0);
@@ -236,7 +236,7 @@ static int benchmark_mixed_workload(void)
             break;
 
         // Add subdirectory
-        char subdir_path[512 + 8];
+        char subdir_path[64];
         snprintf(subdir_path, sizeof(subdir_path), "%s/subdir", dir_path);
         result = bfc_add_dir(writer, subdir_path, 0755, 0);
         if (result != BFC_OK)
@@ -245,7 +245,7 @@ static int benchmark_mixed_workload(void)
         // Add files of varying sizes
         for (int file = 0; file < 20; file++)
         {
-            char file_path[512 + 16];
+            char file_path[64];
             snprintf(file_path, sizeof(file_path), "%s/file_%03d.txt", dir_path, file);
 
             // Vary file sizes: 1KB to 1MB

@@ -16,7 +16,6 @@ set(BFC_LIB_SOURCES
     bfc_format.c
     bfc_writer.c
     bfc_reader.c
-    bfc_iter.c
     bfc_crc32c.c
     bfc_compress.c
     bfc_encrypt.c

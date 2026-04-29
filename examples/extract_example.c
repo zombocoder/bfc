@@ -15,8 +15,8 @@
  */
 
 #define _GNU_SOURCE
-#include "../src/lib/bfc_os.h"
 #include <bfc.h>
+#include <bfc_os.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
