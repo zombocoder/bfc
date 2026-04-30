@@ -24,7 +24,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 // Helper function to create a test container
 static int create_test_container(const char* filename) {
@@ -96,7 +98,7 @@ cleanup:
 }
 
 static int test_open_container(void) {
-  const char* filename = "/tmp/test_reader.bfc";
+  const char* filename = "test_reader.bfc";
 
   // Create test container
   int result = create_test_container(filename);
@@ -115,7 +117,7 @@ static int test_open_container(void) {
 }
 
 static int test_stat_files(void) {
-  const char* filename = "/tmp/test_reader_stat.bfc";
+  const char* filename = "test_reader_stat.bfc";
 
   // Create test container
   int result = create_test_container(filename);
@@ -167,7 +169,7 @@ static int count_entries_cb(const bfc_entry_t* entry, void* user) {
 }
 
 static int test_list_entries(void) {
-  const char* filename = "/tmp/test_reader_list.bfc";
+  const char* filename = "test_reader_list.bfc";
 
   // Create test container
   int result = create_test_container(filename);
@@ -197,7 +199,7 @@ static int test_list_entries(void) {
 }
 
 static int test_read_content(void) {
-  const char* filename = "/tmp/test_reader_read.bfc";
+  const char* filename = "test_reader_read.bfc";
 
   // Create test container
   int result = create_test_container(filename);
@@ -237,8 +239,8 @@ static int test_read_content(void) {
 }
 
 static int test_extract_file(void) {
-  const char* filename = "/tmp/test_reader_extract.bfc";
-  const char* output_file = "/tmp/extracted_file.txt";
+  const char* filename = "test_reader_extract.bfc";
+  const char* output_file = "extracted_file.txt";
 
   // Create test container
   int result = create_test_container(filename);
@@ -250,7 +252,11 @@ static int test_extract_file(void) {
   assert(result == BFC_OK);
 
   // Extract to file
+#ifdef _WIN32
+  int out_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
+#else
   int out_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
   assert(out_fd >= 0);
 
   // Debug: check what we can stat first
@@ -273,7 +279,7 @@ static int test_extract_file(void) {
   close(out_fd);
 
   // Verify extracted content
-  FILE* extracted = fopen(output_file, "r");
+  FILE* extracted = fopen(output_file, "rb");
   assert(extracted != NULL);
 
   char buffer[256];
@@ -291,7 +297,7 @@ static int test_extract_file(void) {
 }
 
 static int test_verify_container(void) {
-  const char* filename = "/tmp/test_reader_verify.bfc";
+  const char* filename = "test_reader_verify.bfc";
 
   // Create test container
   int result = create_test_container(filename);
@@ -317,10 +323,10 @@ static int test_verify_container(void) {
 }
 
 static int test_invalid_container(void) {
-  const char* filename = "/tmp/reader_test_invalid.bfc";
+  const char* filename = "reader_test_invalid.bfc";
 
   // Create invalid file
-  FILE* f = fopen(filename, "w");
+  FILE* f = fopen(filename, "wb");
   assert(f != NULL);
   fprintf(f, "This is not a valid BFC container");
   fclose(f);
@@ -334,7 +340,7 @@ static int test_invalid_container(void) {
   unlink(filename);
 
   // Test non-existent file
-  result = bfc_open("/tmp/nonexistent.bfc", &reader);
+  result = bfc_open("nonexistent.bfc", &reader);
   assert(result != BFC_OK);
   assert(reader == NULL);
 
@@ -350,7 +356,7 @@ static int test_error_conditions(void) {
   int result = bfc_open(NULL, &reader);
   assert(result == BFC_E_INVAL);
 
-  result = bfc_open("/tmp/reader_test.bfc", NULL);
+  result = bfc_open("reader_test.bfc", NULL);
   assert(result == BFC_E_INVAL);
 
   // Test operations on NULL reader
@@ -375,7 +381,7 @@ static int test_error_conditions(void) {
 }
 
 static int test_edge_cases(void) {
-  const char* filename = "/tmp/test_reader_edge.bfc";
+  const char* filename = "test_reader_edge.bfc";
 
   // Create container with edge case data
   int result = create_test_container(filename);
@@ -431,7 +437,7 @@ static int test_edge_cases(void) {
 }
 
 static int test_corrupted_data(void) {
-  const char* filename = "/tmp/test_corrupted.bfc";
+  const char* filename = "test_corrupted.bfc";
 
   // Create a valid container first
   int result = create_test_container(filename);
@@ -457,7 +463,7 @@ static int test_corrupted_data(void) {
 }
 
 static int test_large_file_operations(void) {
-  const char* filename = "/tmp/test_large.bfc";
+  const char* filename = "test_large.bfc";
 
   // Create container with larger content
   unlink(filename);
@@ -510,7 +516,7 @@ static int test_large_file_operations(void) {
 }
 
 static int test_empty_container(void) {
-  const char* filename = "/tmp/reader_test_empty.bfc";
+  const char* filename = "reader_test_empty.bfc";
   unlink(filename);
 
   // Create empty container
@@ -549,7 +555,7 @@ static int test_empty_container(void) {
 }
 
 static int test_directory_only_container(void) {
-  const char* filename = "/tmp/test_dirs_only.bfc";
+  const char* filename = "test_dirs_only.bfc";
   unlink(filename);
 
   // Create container with only directories
@@ -605,7 +611,7 @@ static int test_directory_only_container(void) {
 }
 
 static int test_encryption_functions(void) {
-  const char* filename = "/tmp/test_encrypted.bfc";
+  const char* filename = "test_encrypted.bfc";
   unlink(filename);
 
   // Test bfc_has_encryption on non-encrypted container
@@ -681,7 +687,7 @@ static int test_encryption_functions(void) {
 }
 
 static int test_file_size_edge_cases(void) {
-  const char* filename = "/tmp/test_file_size.bfc";
+  const char* filename = "test_file_size.bfc";
 
   // Create a file that's too small to be a valid BFC container
   FILE* tiny_file = fopen(filename, "wb");
@@ -700,7 +706,7 @@ static int test_file_size_edge_cases(void) {
 }
 
 static int test_index_parse_errors(void) {
-  const char* filename = "/tmp/test_parse_error.bfc";
+  const char* filename = "test_parse_error.bfc";
 
   // Create a valid container first
   int result = create_test_container(filename);
@@ -727,7 +733,7 @@ static int test_index_parse_errors(void) {
 }
 
 static int test_extract_edge_cases(void) {
-  const char* filename = "/tmp/test_extract_edge.bfc";
+  const char* filename = "test_extract_edge.bfc";
 
   // Create test container
   int result = create_test_container(filename);
@@ -742,7 +748,11 @@ static int test_extract_edge_cases(void) {
   assert(result == BFC_E_INVAL);
 
   // Test extract non-existent file
-  int fd = open("/tmp/test_extract_output", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#ifdef _WIN32
+  int fd = open("test_extract_output", O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
+#else
+  int fd = open("test_extract_output", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
   assert(fd >= 0);
 
   result = bfc_extract_to_fd(reader, "nonexistent.txt", fd);
@@ -753,7 +763,7 @@ static int test_extract_edge_cases(void) {
   assert(result == BFC_E_INVAL);
 
   close(fd);
-  unlink("/tmp/test_extract_output");
+  unlink("test_extract_output");
 
   bfc_close_read(reader);
   unlink(filename);
@@ -762,7 +772,7 @@ static int test_extract_edge_cases(void) {
 }
 
 static int test_verify_edge_cases(void) {
-  const char* filename = "/tmp/test_verify_edge.bfc";
+  const char* filename = "test_verify_edge.bfc";
 
   // Create test container
   int result = create_test_container(filename);
@@ -802,7 +812,7 @@ static int test_verify_edge_cases(void) {
 }
 
 static int test_list_edge_cases(void) {
-  const char* filename = "/tmp/test_list_edge.bfc";
+  const char* filename = "test_list_edge.bfc";
 
   // Create test container
   int result = create_test_container(filename);
@@ -838,7 +848,7 @@ static int test_list_edge_cases(void) {
 }
 
 static int test_compressed_files(void) {
-  const char* filename = "/tmp/test_compressed.bfc";
+  const char* filename = "test_compressed.bfc";
   unlink(filename);
 
 #ifdef BFC_WITH_ZSTD
@@ -901,7 +911,11 @@ static int test_compressed_files(void) {
     assert(bytes_read == 0);
 
     // Test extracting compressed file
-    int fd = open("/tmp/test_compressed_output", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#ifdef _WIN32
+    int fd = open("test_compressed_output", O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
+#else
+    int fd = open("test_compressed_output", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
     assert(fd >= 0);
 
     result = bfc_extract_to_fd(reader, "compressed.txt", fd);
@@ -909,13 +923,13 @@ static int test_compressed_files(void) {
     close(fd);
 
     // Verify extracted content
-    FILE* extracted = fopen("/tmp/test_compressed_output", "r");
+    FILE* extracted = fopen("test_compressed_output", "rb");
     assert(extracted != NULL);
     fseek(extracted, 0, SEEK_END);
     long extracted_size = ftell(extracted);
     assert(extracted_size == 52000);
     fclose(extracted);
-    unlink("/tmp/test_compressed_output");
+    unlink("test_compressed_output");
 
     free(buffer);
     bfc_close_read(reader);
@@ -932,7 +946,7 @@ static int test_compressed_files(void) {
 }
 
 static int test_read_errors(void) {
-  const char* filename = "/tmp/test_read_errors.bfc";
+  const char* filename = "test_read_errors.bfc";
 
   // Create test container
   int result = create_test_container(filename);
@@ -989,8 +1003,8 @@ static int create_symlink_test_container(const char* filename) {
 
   // Add a regular file
   const char* content = "Test file content for symlinks";
-  const char* src_file = "/tmp/reader_test_src_symlink.txt";
-  FILE* src = fopen(src_file, "w");
+  const char* src_file = "reader_test_src_symlink.txt";
+  FILE* src = fopen(src_file, "wb");
   if (!src) {
     bfc_close(writer);
     return BFC_E_IO;
@@ -1026,8 +1040,8 @@ static int create_symlink_test_container(const char* filename) {
     return result;
   }
 
-  result = bfc_add_symlink(writer, "absolute_link", "/tmp/absolute_target", 0755,
-                           bfc_os_current_time_ns());
+  result =
+      bfc_add_symlink(writer, "absolute_link", "absolute_target", 0755, bfc_os_current_time_ns());
   if (result != BFC_OK) {
     bfc_close(writer);
     return result;
@@ -1081,7 +1095,7 @@ static int symlink_list_callback(const bfc_entry_t* entry, void* user) {
 }
 
 static int test_read_symlink_stat(void) {
-  const char* filename = "/tmp/reader_test_symlink_stat.bfc";
+  const char* filename = "reader_test_symlink_stat.bfc";
 
   // Create test container
   int result = create_symlink_test_container(filename);
@@ -1112,7 +1126,7 @@ static int test_read_symlink_stat(void) {
   result = bfc_stat(reader, "absolute_link", &entry);
   assert(result == BFC_OK);
   assert(S_ISLNK(entry.mode));
-  assert(entry.size == strlen("/tmp/absolute_target"));
+  assert(entry.size == strlen("absolute_target"));
 
   // Test relative symlink
   result = bfc_stat(reader, "relative_link", &entry);
@@ -1133,7 +1147,7 @@ static int test_read_symlink_stat(void) {
 }
 
 static int test_read_symlink_content(void) {
-  const char* filename = "/tmp/reader_test_symlink_content.bfc";
+  const char* filename = "reader_test_symlink_content.bfc";
 
   // Create test container
   int result = create_symlink_test_container(filename);
@@ -1163,9 +1177,9 @@ static int test_read_symlink_content(void) {
   // Test reading absolute symlink target
   memset(buffer, 0, sizeof(buffer));
   bytes_read = bfc_read(reader, "absolute_link", 0, buffer, sizeof(buffer));
-  assert(bytes_read == strlen("/tmp/absolute_target"));
+  assert(bytes_read == strlen("absolute_target"));
   buffer[bytes_read] = '\0';
-  assert(strcmp(buffer, "/tmp/absolute_target") == 0);
+  assert(strcmp(buffer, "absolute_target") == 0);
 
   // Test reading relative symlink target
   memset(buffer, 0, sizeof(buffer));
@@ -1188,7 +1202,7 @@ static int test_read_symlink_content(void) {
 }
 
 static int test_symlink_listing(void) {
-  const char* filename = "/tmp/reader_test_symlink_list.bfc";
+  const char* filename = "reader_test_symlink_list.bfc";
 
   // Create test container
   int result = create_symlink_test_container(filename);
@@ -1219,7 +1233,7 @@ static int test_symlink_listing(void) {
 }
 
 static int test_symlink_partial_read(void) {
-  const char* filename = "/tmp/reader_test_symlink_partial.bfc";
+  const char* filename = "reader_test_symlink_partial.bfc";
 
   // Create test container
   int result = create_symlink_test_container(filename);
@@ -1232,21 +1246,21 @@ static int test_symlink_partial_read(void) {
 
   // Test partial reads of symlink targets
   char buffer[20];
-  const char* target = "/tmp/absolute_target";
+  const char* target = "absolute_target";
   size_t target_len = strlen(target);
 
-  // Read first part of absolute symlink target
+  // Read first part of absolute symlink target ("absol" = first 5 chars)
   size_t bytes_read = bfc_read(reader, "absolute_link", 0, buffer, 5);
   assert(bytes_read == 5);
   buffer[bytes_read] = '\0';
-  assert(strcmp(buffer, "/tmp/") == 0);
+  assert(strcmp(buffer, "absol") == 0);
 
-  // Read second part - remaining bytes
+  // Read second part - remaining bytes ("ute_target" = chars 5..14)
   size_t remaining = target_len - 5;
   bytes_read = bfc_read(reader, "absolute_link", 5, buffer, remaining);
   assert(bytes_read == remaining);
   buffer[bytes_read] = '\0';
-  assert(strcmp(buffer, "absolute_target") == 0);
+  assert(strcmp(buffer, "ute_target") == 0);
 
   bfc_close_read(reader);
   unlink(filename);

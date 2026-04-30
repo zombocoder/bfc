@@ -15,12 +15,16 @@
  */
 
 #define _GNU_SOURCE
+#include <bfc_os.h>
 #include "bfc_crc32c.h"
 #include "benchmark_common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 static int benchmark_crc32c_small_chunks(void)
 {
@@ -43,7 +47,11 @@ static int benchmark_crc32c_small_chunks(void)
     bfc_crc32c_ctx_t ctx;
     struct timespec start, end;
 
+#ifdef _WIN32
+    clock_gettime(CLOCK_REALTIME, &start);
+#else
     clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
 
     uint32_t final_crc = 0;
     for (int i = 0; i < iterations; i++)
@@ -53,7 +61,11 @@ static int benchmark_crc32c_small_chunks(void)
         final_crc = bfc_crc32c_final(&ctx);
     }
 
+#ifdef _WIN32
+    clock_gettime(CLOCK_REALTIME, &end);
+#else
     clock_gettime(CLOCK_MONOTONIC, &end);
+#endif
 
     free(data);
 
@@ -89,7 +101,11 @@ static int benchmark_crc32c_large_chunks(void)
     bfc_crc32c_ctx_t ctx;
     struct timespec start, end;
 
+#ifdef _WIN32
+    clock_gettime(CLOCK_REALTIME, &start);
+#else
     clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
 
     uint32_t final_crc = 0;
     for (int i = 0; i < iterations; i++)
@@ -104,7 +120,11 @@ static int benchmark_crc32c_large_chunks(void)
         }
     }
 
+#ifdef _WIN32
+    clock_gettime(CLOCK_REALTIME, &end);
+#else
     clock_gettime(CLOCK_MONOTONIC, &end);
+#endif
 
     free(data);
 
@@ -141,7 +161,11 @@ static int benchmark_crc32c_streaming(void)
     bfc_crc32c_ctx_t ctx;
     struct timespec start, end;
 
+#ifdef _WIN32
+    clock_gettime(CLOCK_REALTIME, &start);
+#else
     clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
 
     bfc_crc32c_reset(&ctx);
 
@@ -157,7 +181,11 @@ static int benchmark_crc32c_streaming(void)
 
     uint32_t final_crc = bfc_crc32c_final(&ctx);
 
+#ifdef _WIN32
+    clock_gettime(CLOCK_REALTIME, &end);
+#else
     clock_gettime(CLOCK_MONOTONIC, &end);
+#endif
 
     free(chunk);
 
@@ -201,7 +229,11 @@ static int benchmark_crc32c_alignment(void)
         bfc_crc32c_ctx_t ctx;
         struct timespec start, end;
 
-        clock_gettime(CLOCK_MONOTONIC, &start);
+    #ifdef _WIN32
+    clock_gettime(CLOCK_REALTIME, &start);
+#else
+    clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
 
         uint32_t final_crc = 0;
         for (int i = 0; i < iterations; i++)
@@ -211,7 +243,11 @@ static int benchmark_crc32c_alignment(void)
             final_crc = bfc_crc32c_final(&ctx);
         }
 
-        clock_gettime(CLOCK_MONOTONIC, &end);
+    #ifdef _WIN32
+    clock_gettime(CLOCK_REALTIME, &end);
+#else
+    clock_gettime(CLOCK_MONOTONIC, &end);
+#endif
 
         double elapsed = benchmark_time_diff(&start, &end);
         uint64_t total_bytes = (uint64_t)iterations * chunk_size;

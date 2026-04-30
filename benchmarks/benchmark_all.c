@@ -14,12 +14,15 @@
  * limitations under the License.
  */
 
+#include <bfc_os.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/utsname.h>
 #include <time.h>
+#ifndef _WIN32
+#include <sys/utsname.h>
 #include <unistd.h>
+#endif
 
 // External benchmark functions
 extern int benchmark_crc32c_main(void);
@@ -29,11 +32,15 @@ extern int benchmark_reader_main(void);
 static void print_system_info(void) {
   printf("=== System Information ===\n");
 
+#ifndef _WIN32
   struct utsname info;
   if (uname(&info) == 0) {
     printf("System: %s %s %s\n", info.sysname, info.release, info.machine);
     printf("Node: %s\n", info.nodename);
   }
+#else
+  printf("System: Windows\n");
+#endif
 
   printf("Compiler: ");
 #ifdef __clang__

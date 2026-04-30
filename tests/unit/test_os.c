@@ -22,10 +22,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 static int test_file_operations(void) {
-  const char* test_file = "/tmp/test_bfc_os.dat";
+  const char* test_file = "test_bfc_os.dat";
 
   // Test open for writing
   FILE* file = NULL;
@@ -82,17 +84,15 @@ static int test_file_operations(void) {
   assert(result == BFC_OK);
 
   void* mapped = bfc_os_mmap(file, data_len, 0);
-#ifdef _WIN32
-  // Windows mmap not implemented, should return NULL
-  assert(mapped == NULL);
-#else
-  // Unix should work
+  // Both Unix and Windows should work now
   if (mapped != NULL) {
     assert(memcmp(mapped, test_data, data_len) == 0);
     result = bfc_os_munmap(mapped, data_len);
     assert(result == BFC_OK);
+  } else {
+    // If mmap fails, it's an error unless it's a known limitation
+    assert(mapped != NULL);
   }
-#endif
 
   // Test advisory functions
   result = bfc_os_advise_sequential(file);
@@ -126,14 +126,14 @@ static int test_error_conditions(void) {
   assert(result == BFC_E_INVAL);
 
   // NULL output pointer
-  result = bfc_os_open_read("/tmp/test", NULL);
+  result = bfc_os_open_read("test", NULL);
   assert(result == BFC_E_INVAL);
 
-  result = bfc_os_open_write("/tmp/test", NULL);
+  result = bfc_os_open_write("test", NULL);
   assert(result == BFC_E_INVAL);
 
   // Non-existent file for reading
-  result = bfc_os_open_read("/tmp/nonexistent_file_12345", &file);
+  result = bfc_os_open_read("nonexistent_file_12345", &file);
   assert(result == BFC_E_IO);
 
   // Test invalid file operations
@@ -170,7 +170,7 @@ static int test_error_conditions(void) {
 }
 
 static int test_directory_operations(void) {
-  const char* test_dir = "/tmp/bfc_test_dir_12345";
+  const char* test_dir = "bfc_test_dir_12345";
 
   // Test directory sync (should handle non-existent directory)
   int result = bfc_os_sync_dir(test_dir);
@@ -207,7 +207,7 @@ static int test_directory_operations(void) {
   assert(bfc_os_path_exists(NULL) == 0);
 
   // Clean up
-  system("rm -rf /tmp/bfc_test_dir_12345");
+  system("rm -rf bfc_test_dir_12345");
 
   return 0;
 }
@@ -281,8 +281,8 @@ static int test_time_operations(void) {
   assert(time2 - time1 >= 10000000); // At least 10ms difference
 
   // Test file mtime
-  const char* test_file = "/tmp/test_mtime.dat";
-  FILE* file = fopen(test_file, "w");
+  const char* test_file = "test_mtime.dat";
+  FILE* file = fopen(test_file, "wb");
   assert(file != NULL);
   fprintf(file, "test");
   fclose(file);
@@ -291,7 +291,7 @@ static int test_time_operations(void) {
   assert(mtime > 0);
 
   // Test with non-existent file
-  uint64_t bad_mtime = bfc_os_file_mtime_ns("/tmp/nonexistent_file_12345");
+  uint64_t bad_mtime = bfc_os_file_mtime_ns("nonexistent_file_12345");
   assert(bad_mtime == 0);
 
   // Test with NULL
@@ -305,24 +305,31 @@ static int test_time_operations(void) {
 
 static int test_executable_check(void) {
   // Create a test file
-  const char* test_file = "/tmp/test_exec.sh";
-  FILE* file = fopen(test_file, "w");
+#ifdef _WIN32
+  const char* test_file = "test_exec.exe";
+#else
+  const char* test_file = "test_exec.sh";
+#endif
+  FILE* file = fopen(test_file, "wb");
   assert(file != NULL);
   fprintf(file, "#!/bin/sh\necho test\n");
   fclose(file);
 
-  // Initially not executable
+  // Initially not executable (on Unix) or check extension (on Windows)
+#ifdef _WIN32
+  assert(bfc_os_is_executable(test_file) == 1); // .exe is always executable in our impl
+#else
   assert(bfc_os_is_executable(test_file) == 0);
-
   // Make it executable
   chmod(test_file, 0755);
   assert(bfc_os_is_executable(test_file) == 1);
+#endif
 
   // Test with NULL
   assert(bfc_os_is_executable(NULL) == 0);
 
   // Test with non-existent file
-  assert(bfc_os_is_executable("/tmp/nonexistent_exec_12345") == 0);
+  assert(bfc_os_is_executable("nonexistent_exec_12345") == 0);
 
   unlink(test_file);
 

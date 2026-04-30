@@ -16,7 +16,6 @@ set(BFC_LIB_SOURCES
     bfc_format.c
     bfc_writer.c
     bfc_reader.c
-    bfc_iter.c
     bfc_crc32c.c
     bfc_compress.c
     bfc_encrypt.c
@@ -38,8 +37,10 @@ add_library(bfc_shared SHARED ${BFC_LIB_SOURCES})
 
 # Enable SSE4.2 and CRC32 for hardware support on x86_64
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
-    target_compile_options(bfc PRIVATE -msse4.2 -mcrc32)
-    target_compile_options(bfc_shared PRIVATE -msse4.2 -mcrc32)
+    if(NOT MSVC)
+        target_compile_options(bfc PRIVATE -msse4.2 -mcrc32)
+        target_compile_options(bfc_shared PRIVATE -msse4.2 -mcrc32)
+    endif()
 endif()
 
 # Set properties for both libraries
@@ -50,7 +51,11 @@ foreach(target bfc bfc_shared)
     )
     
     # Link with math library if needed
-    target_link_libraries(${target} m)
+    if(NOT WIN32)
+        target_link_libraries(${target} m)
+    else()
+        target_link_libraries(${target} bcrypt)
+    endif()
     
     # Optional dependencies
     if(BFC_WITH_FUSE)

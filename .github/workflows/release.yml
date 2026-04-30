@@ -29,6 +29,11 @@ jobs:
             cc: clang
             cxx: clang++
             platform: macos
+          - os: windows-latest
+            arch: x86_64
+            cc: cl
+            cxx: cl
+            platform: windows
 
     runs-on: ${{ matrix.os }}
 
@@ -51,7 +56,14 @@ jobs:
           # Install create-dmg for DMG creation, zstd for compression, and libsodium for encryption
           brew install create-dmg zstd libsodium
 
-      - name: Build Release
+      - name: Install dependencies (Windows)
+        if: matrix.platform == 'windows'
+        run: |
+          vcpkg install zstd:x64-windows libsodium:x64-windows
+          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+
+      - name: Build Release (non-Windows)
+        if: matrix.platform != 'windows'
         env:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
@@ -66,12 +78,32 @@ jobs:
 
           cmake --build build --config Release -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
-      - name: Run tests
+      - name: Build Release (Windows)
+        if: matrix.platform == 'windows'
+        run: |
+          cmake -B build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DBFC_WITH_ZSTD=ON `
+            -DBFC_WITH_SODIUM=ON `
+            -DBFC_BUILD_BENCHMARKS=OFF
+          cmake --build build --config Release -j4
+
+      - name: Run tests (non-Windows)
+        if: matrix.platform != 'windows'
         run: |
           cd build
           ctest --output-on-failure
 
-      - name: Test CLI functionality
+      - name: Run tests (Windows)
+        if: matrix.platform == 'windows'
+        run: |
+          cd build
+          ctest --output-on-failure -C Release
+
+      - name: Test CLI functionality (non-Windows)
+        if: matrix.platform != 'windows'
         run: |
           # Create test data
           mkdir -p test_data
@@ -158,11 +190,50 @@ jobs:
           rm -rf test.bfc test_data test_compressed.bfc test_fast.bfc test_balanced.bfc
           rm -rf test_encrypted.bfc test_keyfile.bfc test_enc_comp.bfc test.key
 
+      - name: Test CLI functionality (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force test_data\subdir | Out-Null
+          "Hello World" | Out-File -Encoding utf8 test_data\hello.txt
+          "Goodbye"     | Out-File -Encoding utf8 test_data\bye.txt
+          "Nested file" | Out-File -Encoding utf8 test_data\subdir\nested.txt
+
+          $bfc = Get-ChildItem -Recurse build\bin -Filter bfc.exe | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $bfc) { Write-Error "bfc.exe not found"; exit 1 }
+
+          & $bfc create test.bfc test_data\
+          & $bfc list test.bfc
+          & $bfc info test.bfc
+          & $bfc verify test.bfc
+          & $bfc verify --deep test.bfc
+
+          & $bfc create -c zstd test_compressed.bfc test_data\
+          & $bfc verify test_compressed.bfc
+
+          New-Item -ItemType Directory -Force extract_test | Out-Null
+          Push-Location extract_test
+          & $bfc extract ..\test.bfc
+          if (Test-Path hello.txt) { Write-Output "hello.txt extracted" }
+          Pop-Location
+          Remove-Item -Recurse -Force extract_test
+
+          & $bfc create -e testpassword123 test_encrypted.bfc test_data\
+          New-Item -ItemType Directory -Force extract_enc | Out-Null
+          Push-Location extract_enc
+          & $bfc extract -p testpassword123 ..\test_encrypted.bfc
+          if (Test-Path hello.txt) { Write-Output "hello.txt extracted from encrypted container" }
+          Pop-Location
+          Remove-Item -Recurse -Force extract_enc
+
+          Remove-Item -Recurse -Force test_data, test.bfc, test_compressed.bfc, test_encrypted.bfc -ErrorAction SilentlyContinue
+
       - name: Get version
         id: get_version
         run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Create release package
+      - name: Create release package (non-Windows)
+        if: matrix.platform != 'windows'
         run: |
           VERSION=${{ steps.get_version.outputs.version }}
           PACKAGE_NAME=bfc-${VERSION#v}-${{ matrix.platform }}-${{ matrix.arch }}
@@ -215,6 +286,42 @@ jobs:
 
           # Create tarball
           tar -czf ${PACKAGE_NAME}.tar.gz ${PACKAGE_NAME}
+
+      - name: Create release package (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $version = "${{ steps.get_version.outputs.version }}"
+          $versionNoV = $version.TrimStart('v')
+          $pkgName = "bfc-$versionNoV-windows-x86_64"
+
+          New-Item -ItemType Directory -Force $pkgName | Out-Null
+
+          # Find and copy binaries
+          $bfcExe = Get-ChildItem -Recurse build\bin -Filter bfc.exe | Select-Object -First 1 -ExpandProperty FullName
+          Copy-Item $bfcExe "$pkgName\bfc.exe"
+          Copy-Item (Get-ChildItem -Recurse build\lib -Filter bfc.lib | Select-Object -First 1 -ExpandProperty FullName) "$pkgName\bfc.lib"
+          Copy-Item (Get-ChildItem -Recurse build\lib -Filter bfc.dll -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName) "$pkgName\bfc.dll" -ErrorAction SilentlyContinue
+
+          # Copy headers and docs
+          Copy-Item include\bfc.h "$pkgName\"
+          Copy-Item README.md "$pkgName\"
+          Copy-Item LICENSE "$pkgName\"
+
+          # Create install script
+          @'
+          @echo off
+          echo Installing BFC...
+          copy bfc.exe "%ProgramFiles%\bfc\bfc.exe" 2>nul || (
+            mkdir "%ProgramFiles%\bfc"
+            copy bfc.exe "%ProgramFiles%\bfc\bfc.exe"
+          )
+          copy bfc.h "%ProgramFiles%\bfc\bfc.h"
+          echo BFC installed to %ProgramFiles%\bfc
+          '@ | Out-File -Encoding ascii "$pkgName\install.bat"
+
+          # Create ZIP
+          Compress-Archive -Path $pkgName -DestinationPath "$pkgName.zip"
 
       - name: Create DEB and RPM packages (Linux only)
         if: matrix.platform == 'linux'

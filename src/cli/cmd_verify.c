@@ -110,22 +110,6 @@ static int verify_progress_callback(const bfc_entry_t* entry, void* user) {
   return 0;
 }
 
-__attribute__((unused)) static int verify_entry_callback(const bfc_entry_t* entry, void* user) {
-  verify_progress_t* ctx = (verify_progress_t*) user;
-
-  ctx->verified_entries++;
-
-  if (ctx->show_progress) {
-    if (S_ISREG(entry->mode)) {
-      printf("Verifying (%d/%d): %s\n", ctx->verified_entries, ctx->total_entries, entry->path);
-    } else {
-      printf("Checking (%d/%d): %s\n", ctx->verified_entries, ctx->total_entries, entry->path);
-    }
-  }
-
-  return 0;
-}
-
 int cmd_verify(int argc, char* argv[]) {
   verify_options_t opts;
   int result = parse_verify_options(argc, argv, &opts);
