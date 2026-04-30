@@ -230,7 +230,8 @@ jobs:
 
       - name: Get version
         id: get_version
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        shell: bash
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Create release package (non-Windows)
         if: matrix.platform != 'windows'
@@ -464,28 +465,19 @@ jobs:
           hdiutil create -volname "BFC ${VERSION_NO_V}" -srcfolder dmg-contents -ov -format UDZO "${DMG_NAME}.dmg"
 
       - name: Upload Release Assets
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           echo "Current directory contents:"
           ls -la
-          
+
           echo "Looking for package files..."
-          find . -name "*.tar.gz" -o -name "*.deb" -o -name "*.rpm" -o -name "*.dmg" | head -20
-          
-          # Upload all package files to the existing release
-          for file in *.tar.gz *.deb *.rpm *.dmg; do
-            if [ -f "$file" ]; then
-              echo "Uploading $file to release ${VERSION}"
-              gh release upload "${VERSION}" "$file" --clobber
-            fi
+          find . -maxdepth 1 \( -name "*.tar.gz" -o -name "*.deb" -o -name "*.rpm" -o -name "*.dmg" -o -name "*.zip" \)
+
+          shopt -s nullglob
+          for file in *.tar.gz *.deb *.rpm *.dmg *.zip; do
+            echo "Uploading $file to release ${VERSION}"
+            gh release upload "${VERSION}" "$file" --clobber
           done
-          
-          # Also try to upload from current directory using find results
-          find . -maxdepth 1 \( -name "*.tar.gz" -o -name "*.deb" -o -name "*.rpm" -o -name "*.dmg" \) -exec bash -c '
-            for file; do
-              echo "Found and uploading: $file"
-              gh release upload "${{ steps.get_version.outputs.version }}" "$file" --clobber
-            done
-          ' _ {} +
