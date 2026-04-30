@@ -14,18 +14,19 @@
  * limitations under the License.
  */
 
-#define _GNU_SOURCE
 #include "cli.h"
+#ifndef _WIN32
+#include <libgen.h>
+#include <sys/time.h>
+#include <unistd.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
-#include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 #include <time.h>
-#include <unistd.h>
 
 #ifdef BFC_WITH_SODIUM
 static int read_key_from_file(const char* filename, uint8_t key[32]) {
@@ -168,28 +169,32 @@ static int create_parent_directories(const char* path, int force) {
     return 0;
   }
 
-  struct stat st;
-  if (stat(dir, &st) == 0) {
-    if (!S_ISDIR(st.st_mode)) {
-      print_error("'%s' exists but is not a directory", dir);
-      free(path_copy);
-      return -1;
-    }
-    free(path_copy);
-    return 0;
-  }
-
-  // Recursively create parent directories
+  // Recursively create parent directories first
   if (create_parent_directories(dir, force) != 0) {
     free(path_copy);
     return -1;
   }
 
   print_verbose("Creating directory: %s", dir);
+#ifdef _WIN32
+  if (mkdir(dir) != 0) {
+#else
   if (mkdir(dir, 0755) != 0) {
-    print_error("Cannot create directory '%s': %s", dir, strerror(errno));
-    free(path_copy);
-    return -1;
+#endif
+    if (errno == EEXIST) {
+      // Directory already exists - verify it is actually a directory
+      struct stat st;
+      if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        print_error("'%s' exists but is not a directory", dir);
+        free(path_copy);
+        return -1;
+      }
+      // Already a directory, that is fine
+    } else {
+      print_error("Cannot create directory '%s': %s", dir, strerror(errno));
+      free(path_copy);
+      return -1;
+    }
   }
 
   free(path_copy);
@@ -198,13 +203,6 @@ static int create_parent_directories(const char* path, int force) {
 
 static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* output_path,
                         int force) {
-  // Check if file exists
-  struct stat st;
-  if (stat(output_path, &st) == 0 && !force) {
-    print_error("File '%s' already exists. Use -f to overwrite.", output_path);
-    return -1;
-  }
-
   // Create parent directories
   if (create_parent_directories(output_path, force) != 0) {
     return -1;
@@ -212,10 +210,21 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
 
   print_verbose("Extracting file: %s -> %s", entry->path, output_path);
 
-  // Open output file
-  int fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, entry->mode & 0777);
+  // Open output file atomically: O_EXCL rejects existing files when !force,
+  // O_NOFOLLOW prevents symlink attacks (POSIX). No separate stat() needed.
+#ifdef _WIN32
+  int oflags = O_WRONLY | O_CREAT | O_BINARY | (force ? O_TRUNC : O_EXCL);
+  int fd = open(output_path, oflags, _S_IREAD | _S_IWRITE);
+#else
+  int oflags = O_WRONLY | O_CREAT | O_NOFOLLOW | (force ? O_TRUNC : O_EXCL);
+  int fd = open(output_path, oflags, entry->mode & 0777);
+#endif
   if (fd < 0) {
-    print_error("Cannot create file '%s': %s", output_path, strerror(errno));
+    if (!force && errno == EEXIST) {
+      print_error("File '%s' already exists. Use -f to overwrite.", output_path);
+    } else {
+      print_error("Cannot create file '%s': %s", output_path, strerror(errno));
+    }
     return -1;
   }
 
@@ -229,11 +238,14 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
     return -1;
   }
 
-  // Set file permissions and timestamps using file descriptor to avoid TOCTOU race conditions
+// Set file permissions and timestamps using file descriptor to avoid TOCTOU race conditions
+#ifndef _WIN32
   if (fchmod(fd, entry->mode & 0777) != 0) {
     print_verbose("Warning: cannot set permissions on '%s': %s", output_path, strerror(errno));
   }
+#endif
 
+#ifndef _WIN32
   struct timespec times[2] = {
       {.tv_sec = entry->mtime_ns / 1000000000ULL,
        .tv_nsec = entry->mtime_ns % 1000000000ULL}, // atime = mtime
@@ -244,7 +256,7 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
   if (futimens(fd, times) != 0) {
     print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
   }
-
+#endif
   // Close file descriptor after setting metadata
   close(fd);
 
@@ -256,6 +268,8 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
 }
 
 static int extract_directory(const char* output_path, const bfc_entry_t* entry, int force) {
+#ifdef _WIN32
+  (void) entry; // permissions and timestamps are POSIX-only
   struct stat st;
   if (stat(output_path, &st) == 0) {
     if (!S_ISDIR(st.st_mode)) {
@@ -268,49 +282,19 @@ static int extract_directory(const char* output_path, const bfc_entry_t* entry, 
         return -1;
       }
     } else {
-      // Directory already exists, just update permissions and timestamps
-      if (chmod(output_path, entry->mode & 0777) != 0) {
-        print_verbose("Warning: cannot set permissions on '%s': %s", output_path, strerror(errno));
-      }
-
-      struct timespec times[2] = {
-          {.tv_sec = entry->mtime_ns / 1000000000ULL,
-           .tv_nsec = entry->mtime_ns % 1000000000ULL}, // atime = mtime
-          {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL}
-          // mtime
-      };
-
-      if (utimensat(AT_FDCWD, output_path, times, 0) != 0) {
-        print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
-      }
-
       return 0;
     }
   }
 
-  // Create parent directories
   if (create_parent_directories(output_path, force) != 0) {
     return -1;
   }
 
   print_verbose("Creating directory: %s", output_path);
 
-  // Create directory
-  if (mkdir(output_path, entry->mode & 0777) != 0) {
+  if (mkdir(output_path) != 0) {
     print_error("Cannot create directory '%s': %s", output_path, strerror(errno));
     return -1;
-  }
-
-  // Set timestamps
-  struct timespec times[2] = {
-      {.tv_sec = entry->mtime_ns / 1000000000ULL,
-       .tv_nsec = entry->mtime_ns % 1000000000ULL}, // atime = mtime
-      {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL}
-      // mtime
-  };
-
-  if (utimensat(AT_FDCWD, output_path, times, 0) != 0) {
-    print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
   }
 
   if (!g_options.quiet) {
@@ -318,6 +302,74 @@ static int extract_directory(const char* output_path, const bfc_entry_t* entry, 
   }
 
   return 0;
+#else
+  // POSIX: use open() as the atomic probe — no preceding stat() to avoid TOCTOU.
+  int dirfd = open(output_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+  if (dirfd >= 0) {
+    // Directory exists — update permissions and timestamps via fd.
+    if (fchmod(dirfd, entry->mode & 0777) != 0) {
+      print_verbose("Warning: cannot set permissions on '%s': %s", output_path, strerror(errno));
+    }
+    struct timespec times[2] = {
+        {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL},
+        {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL}};
+    if (futimens(dirfd, times) != 0) {
+      print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
+    }
+    close(dirfd);
+    return 0;
+  }
+
+  int open_errno = errno;
+
+  if (open_errno == ENOTDIR || open_errno == ELOOP) {
+    // Path exists but is not a directory, or is a symlink (O_NOFOLLOW sets ELOOP).
+    if (!force) {
+      print_error("'%s' exists but is not a directory. Use -f to overwrite.", output_path);
+      return -1;
+    }
+    if (unlink(output_path) != 0) {
+      print_error("Cannot remove '%s': %s", output_path, strerror(errno));
+      return -1;
+    }
+    // fall through to create
+  } else if (open_errno != ENOENT) {
+    print_error("Cannot access '%s': %s", output_path, strerror(open_errno));
+    return -1;
+  }
+
+  // Create parent directories then the directory itself.
+  if (create_parent_directories(output_path, force) != 0) {
+    return -1;
+  }
+
+  print_verbose("Creating directory: %s", output_path);
+
+  if (mkdir(output_path, entry->mode & 0777) != 0) {
+    print_error("Cannot create directory '%s': %s", output_path, strerror(errno));
+    return -1;
+  }
+
+  // Set timestamps via fd.
+  {
+    int dirfd_new = open(output_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    if (dirfd_new >= 0) {
+      struct timespec times[2] = {
+          {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL},
+          {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL}};
+      if (futimens(dirfd_new, times) != 0) {
+        print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
+      }
+      close(dirfd_new);
+    }
+  }
+
+  if (!g_options.quiet) {
+    printf("Created: %s/\n", output_path);
+  }
+
+  return 0;
+#endif
 }
 
 static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* output_path,
@@ -353,7 +405,8 @@ static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* 
   }
   target[entry->size] = '\0';
 
-  // Create symlink
+// Create symlink
+#ifndef _WIN32
   if (symlink(target, output_path) != 0) {
     print_error("Cannot create symlink '%s' -> '%s': %s", output_path, target, strerror(errno));
     free(target);
@@ -372,6 +425,9 @@ static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* 
     print_verbose("Warning: cannot set timestamps on symlink '%s': %s", output_path,
                   strerror(errno));
   }
+#else
+  print_verbose("Warning: symlinks are not supported on Windows, skipping '%s'", entry->path);
+#endif
 
   if (!g_options.quiet) {
     printf("Extracted: %s -> %s\n", output_path, target);

@@ -29,13 +29,17 @@
  */
 
 #include <bfc.h>
+#ifdef _WIN32
+#include <bfc_win32_compat.h>
+#else
+#include <unistd.h>
+#endif
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <unistd.h>
 
 // Extraction context for callback
 typedef struct {

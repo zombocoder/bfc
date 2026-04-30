@@ -16,6 +16,7 @@
 
 #define _GNU_SOURCE
 #include <bfc.h>
+#include <bfc_os.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -23,7 +24,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 // Callback to collect all file entries for extraction
 struct extract_context {

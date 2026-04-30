@@ -20,10 +20,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 static int test_create_empty_container(void) {
-  const char* filename = "/tmp/writer_test_empty.bfc";
+  const char* filename = "writer_test_empty.bfc";
 
   // Clean up any existing file
   unlink(filename);
@@ -54,15 +56,15 @@ static int test_create_empty_container(void) {
 }
 
 static int test_add_single_file(void) {
-  const char* filename = "/tmp/test_single.bfc";
+  const char* filename = "test_single.bfc";
   const char* content = "Hello, BFC!";
 
   // Clean up
   unlink(filename);
 
   // Create temporary source file
-  const char* src_file = "/tmp/test_src.txt";
-  FILE* src = fopen(src_file, "w");
+  const char* src_file = "test_src.txt";
+  FILE* src = fopen(src_file, "wb");
   assert(src != NULL);
   fwrite(content, 1, strlen(content), src);
   fclose(src);
@@ -96,7 +98,7 @@ static int test_add_single_file(void) {
 }
 
 static int test_add_directory(void) {
-  const char* filename = "/tmp/test_dir.bfc";
+  const char* filename = "test_dir.bfc";
 
   unlink(filename);
 
@@ -118,7 +120,7 @@ static int test_add_directory(void) {
 }
 
 static int test_duplicate_paths(void) {
-  const char* filename = "/tmp/test_dup.bfc";
+  const char* filename = "test_dup.bfc";
 
   unlink(filename);
 
@@ -141,7 +143,7 @@ static int test_duplicate_paths(void) {
 }
 
 static int test_invalid_paths(void) {
-  const char* filename = "/tmp/writer_test_invalid.bfc";
+  const char* filename = "writer_test_invalid.bfc";
 
   unlink(filename);
 
@@ -166,7 +168,7 @@ static int test_invalid_paths(void) {
 }
 
 static int test_multiple_files(void) {
-  const char* filename = "/tmp/test_multi.bfc";
+  const char* filename = "test_multi.bfc";
 
   unlink(filename);
 
@@ -186,9 +188,9 @@ static int test_multiple_files(void) {
   for (int i = 0; i < num_files; i++) {
     // Create temp source file
     char src_name[64];
-    snprintf(src_name, sizeof(src_name), "/tmp/test_src_%d.txt", i);
+    snprintf(src_name, sizeof(src_name), "test_src_%d.txt", i);
 
-    FILE* src = fopen(src_name, "w");
+    FILE* src = fopen(src_name, "wb");
     assert(src != NULL);
     fwrite(contents[i], 1, strlen(contents[i]), src);
     fclose(src);
@@ -220,20 +222,20 @@ static int test_error_conditions(void) {
   int result = bfc_create(NULL, 4096, 0, &writer);
   assert(result == BFC_E_INVAL);
 
-  result = bfc_create("/tmp/writer_test.bfc", 4096, 0, NULL);
+  result = bfc_create("writer_test.bfc", 4096, 0, NULL);
   assert(result == BFC_E_INVAL);
 
   // Test block size of 0 (should default to header size)
-  result = bfc_create("/tmp/writer_test.bfc", 0, 0, &writer);
+  result = bfc_create("writer_test.bfc", 0, 0, &writer);
   assert(result == BFC_OK);
   bfc_close(writer);
-  unlink("/tmp/writer_test.bfc");
+  unlink("writer_test.bfc");
 
   // Note: Small block size may be accepted and rounded up
-  result = bfc_create("/tmp/writer_test.bfc", 100, 0, &writer);
+  result = bfc_create("writer_test.bfc", 100, 0, &writer);
   if (result == BFC_OK) {
     bfc_close(writer);
-    unlink("/tmp/writer_test.bfc");
+    unlink("writer_test.bfc");
   } else {
     assert(result == BFC_E_INVAL);
   }
@@ -259,7 +261,7 @@ static int test_error_conditions(void) {
 }
 
 static int test_file_parameter_validation(void) {
-  const char* filename = "/tmp/test_validation.bfc";
+  const char* filename = "test_validation.bfc";
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -299,7 +301,7 @@ static int test_file_parameter_validation(void) {
 }
 
 static int test_large_file_handling(void) {
-  const char* filename = "/tmp/test_large_writer.bfc";
+  const char* filename = "test_large_writer.bfc";
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -332,7 +334,7 @@ static int test_large_file_handling(void) {
 }
 
 static int test_binary_file_handling(void) {
-  const char* filename = "/tmp/test_binary.bfc";
+  const char* filename = "test_binary.bfc";
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -365,7 +367,7 @@ static int test_binary_file_handling(void) {
 }
 
 static int test_many_files(void) {
-  const char* filename = "/tmp/test_many.bfc";
+  const char* filename = "test_many.bfc";
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -401,7 +403,7 @@ static int test_many_files(void) {
 }
 
 static int test_deep_directory_structure(void) {
-  const char* filename = "/tmp/test_deep.bfc";
+  const char* filename = "test_deep.bfc";
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -437,7 +439,7 @@ static int test_deep_directory_structure(void) {
 }
 
 static int test_various_permissions(void) {
-  const char* filename = "/tmp/test_perms.bfc";
+  const char* filename = "test_perms.bfc";
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -485,7 +487,7 @@ static int test_various_permissions(void) {
 }
 
 static int test_empty_file(void) {
-  const char* filename = "/tmp/test_empty_file.bfc";
+  const char* filename = "test_empty_file.bfc";
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -515,7 +517,7 @@ static int test_empty_file(void) {
 }
 
 static int test_finish_before_close(void) {
-  const char* filename = "/tmp/test_finish_close.bfc";
+  const char* filename = "test_finish_close.bfc";
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -545,7 +547,7 @@ static int test_finish_before_close(void) {
 }
 
 static int test_add_simple_symlink(void) {
-  const char* filename = "/tmp/test_symlink.bfc";
+  const char* filename = "test_symlink.bfc";
   const char* target = "target.txt";
 
   // Clean up
@@ -570,8 +572,8 @@ static int test_add_simple_symlink(void) {
 }
 
 static int test_add_absolute_symlink(void) {
-  const char* filename = "/tmp/test_abs_symlink.bfc";
-  const char* target = "/tmp/absolute_target.txt";
+  const char* filename = "test_abs_symlink.bfc";
+  const char* target = "absolute_target.txt";
 
   // Clean up
   unlink(filename);
@@ -595,7 +597,7 @@ static int test_add_absolute_symlink(void) {
 }
 
 static int test_add_relative_symlink(void) {
-  const char* filename = "/tmp/test_rel_symlink.bfc";
+  const char* filename = "test_rel_symlink.bfc";
   const char* target = "../parent/target.txt";
 
   // Clean up
@@ -620,7 +622,7 @@ static int test_add_relative_symlink(void) {
 }
 
 static int test_symlink_parameter_validation(void) {
-  const char* filename = "/tmp/test_symlink_validation.bfc";
+  const char* filename = "test_symlink_validation.bfc";
 
   // Clean up
   unlink(filename);
@@ -655,7 +657,7 @@ static int test_symlink_parameter_validation(void) {
 }
 
 static int test_symlink_duplicate_paths(void) {
-  const char* filename = "/tmp/test_symlink_dup.bfc";
+  const char* filename = "test_symlink_dup.bfc";
 
   // Clean up
   unlink(filename);
@@ -683,7 +685,7 @@ static int test_symlink_duplicate_paths(void) {
 }
 
 static int test_symlink_long_target(void) {
-  const char* filename = "/tmp/test_symlink_long.bfc";
+  const char* filename = "test_symlink_long.bfc";
 
   // Create a long target path
   char long_target[1024];
@@ -712,15 +714,15 @@ static int test_symlink_long_target(void) {
 }
 
 static int test_mixed_content_with_symlinks(void) {
-  const char* filename = "/tmp/test_mixed_symlinks.bfc";
+  const char* filename = "test_mixed_symlinks.bfc";
   const char* content = "Test file content";
 
   // Clean up
   unlink(filename);
 
   // Create temporary source file
-  const char* src_file = "/tmp/test_mixed_src.txt";
-  FILE* src = fopen(src_file, "w");
+  const char* src_file = "test_mixed_src.txt";
+  FILE* src = fopen(src_file, "wb");
   assert(src != NULL);
   fwrite(content, 1, strlen(content), src);
   fclose(src);
@@ -750,7 +752,7 @@ static int test_mixed_content_with_symlinks(void) {
   result = bfc_add_symlink(writer, "link_to_dir", "testdir", 0755, bfc_os_current_time_ns());
   assert(result == BFC_OK);
 
-  result = bfc_add_symlink(writer, "absolute_link.txt", "/tmp/absolute_target", 0755,
+  result = bfc_add_symlink(writer, "absolute_link.txt", "absolute_target", 0755,
                            bfc_os_current_time_ns());
   assert(result == BFC_OK);
 
