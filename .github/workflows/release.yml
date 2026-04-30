@@ -19,11 +19,6 @@ jobs:
             cc: clang
             cxx: clang++
             platform: linux
-          - os: macos-13
-            arch: x86_64
-            cc: clang
-            cxx: clang++
-            platform: macos
           - os: macos-14
             arch: arm64
             cc: clang
