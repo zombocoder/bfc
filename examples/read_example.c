@@ -16,6 +16,7 @@
 
 #define _GNU_SOURCE
 #include <bfc.h>
+#include <bfc_os.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>

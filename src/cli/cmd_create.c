@@ -14,16 +14,38 @@
  * limitations under the License.
  */
 
-#define _GNU_SOURCE
 #include "cli.h"
+#ifndef _WIN32
 #include <dirent.h>
+#include <unistd.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <unistd.h>
+
+#ifdef BFC_WITH_SODIUM
+// Function to read encryption key from file
+static int read_key_from_file(const char* keyfile, uint8_t key[32]) {
+  FILE* f = fopen(keyfile, "rb");
+  if (!f) {
+    print_error("Cannot open key file '%s': %s", keyfile, strerror(errno));
+    return -1;
+  }
+
+  size_t bytes_read = fread(key, 1, 32, f);
+  fclose(f);
+
+  if (bytes_read != 32) {
+    print_error("Key file '%s' must contain exactly 32 bytes (got %zu)", keyfile, bytes_read);
+    return -1;
+  }
+
+  return 0;
+}
+#endif
 
 #ifdef BFC_WITH_SODIUM
 // Function to read encryption key from file
@@ -233,6 +255,7 @@ static int add_file_to_container(bfc_t* writer, const char* file_path, const cha
   return 0;
 }
 
+#ifndef _WIN32
 static int add_symlink_to_container(bfc_t* writer, const char* link_path,
                                     const char* container_path) {
   print_verbose("Adding symlink: %s -> %s", link_path, container_path);
@@ -268,6 +291,7 @@ static int add_symlink_to_container(bfc_t* writer, const char* link_path,
 
   return 0;
 }
+#endif
 
 static int add_directory_to_container(bfc_t* writer, const char* dir_path,
                                       const char* container_path);
@@ -296,7 +320,12 @@ static int process_directory_entry(bfc_t* writer, const char* base_path, const c
   } else if (S_ISDIR(st.st_mode)) {
     return add_directory_to_container(writer, full_path, container_path);
   } else if (S_ISLNK(st.st_mode)) {
+#ifndef _WIN32
     return add_symlink_to_container(writer, full_path, container_path);
+#else
+    print_verbose("Skipping symlink on Windows: %s", full_path);
+    return 0;
+#endif
   } else {
     print_verbose("Skipping special file: %s", full_path);
     return 0;
@@ -488,10 +517,14 @@ int cmd_create(int argc, char* argv[]) {
         return 1;
       }
     } else if (S_ISLNK(st.st_mode)) {
+#ifndef _WIN32
       if (add_symlink_to_container(writer, input_path, basename) != 0) {
         bfc_close(writer);
         return 1;
       }
+#else
+      print_verbose("Skipping symlink on Windows: %s", input_path);
+#endif
     } else {
       print_error("'%s' is not a regular file, directory, or symlink", input_path);
       bfc_close(writer);

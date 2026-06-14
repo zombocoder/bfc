@@ -15,7 +15,7 @@ A high-performance, single-file container format for storing files and directori
 - **Optional compression** - ZSTD compression with intelligent content analysis
 - **Optional encryption** - ChaCha20-Poly1305 AEAD with Argon2id key derivation
 - **Integrity validation** - CRC32C checksums with hardware acceleration
-- **Cross-platform** - Works on Linux, macOS, FreeBSD, and other Unix systems
+- **Cross-platform** - Works on Linux, macOS, FreeBSD, and Windows (MSVC/MinGW-w64)
 - **Crash-safe writes** - Atomic container creation with index at EOF
 - **Memory efficient** - Optimized for large containers and small memory footprint
 
@@ -46,14 +46,14 @@ cmake --build build
 
 ### Prerequisites
 
-- C17 compatible compiler (GCC 7+, Clang 6+)
+- C17 compatible compiler (GCC 7+, Clang 6+, or MSVC 2019+)
 - CMake 3.15+
-- POSIX-compliant system
 
 **Optional dependencies:**
 - ZSTD library for compression support
 - libsodium for encryption support
-- pkg-config (or pkgconf on FreeBSD) for dependency detection
+- pkg-config (or pkgconf on FreeBSD/Linux) for dependency detection on Unix
+- vcpkg for dependency management on Windows
 
 ### Build from source
 
@@ -86,6 +86,32 @@ make
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBFC_WITH_ZSTD=ON -DBFC_WITH_SODIUM=ON
 make -C build
 ```
+
+**Windows (MSVC) setup:**
+
+```powershell
+# Install dependencies via vcpkg
+vcpkg install zstd:x64-windows libsodium:x64-windows
+
+# Configure with vcpkg toolchain
+cmake -B build `
+  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+  -DVCPKG_TARGET_TRIPLET=x64-windows `
+  -DBFC_WITH_ZSTD=ON `
+  -DBFC_WITH_SODIUM=ON
+
+# Build
+cmake --build build --config Release
+
+# Run
+.\build\bin\Release\bfc.exe create archive.bfc path\to\files\
+```
+
+> **Windows notes:**
+> - Symlink creation requires Developer Mode or elevated privileges; symlinks stored in
+>   containers are extracted as regular files on Windows without Developer Mode.
+> - FUSE mount (`BFC_WITH_FUSE`) is not supported on Windows.
+> - MinGW-w64 is also supported; use the standard Unix cmake/make flow with the MinGW generator.
 
 ### Build options
 

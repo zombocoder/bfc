@@ -25,7 +25,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 // Test basic encryption support detection
 static int test_encryption_support(void) {
@@ -264,7 +266,7 @@ static int test_encryption_utilities(void) {
 
 // Test BFC writer encryption settings
 static int test_writer_encryption_settings(void) {
-  const char* filename = "/tmp/test_encryption_writer.bfc";
+  const char* filename = "test_encryption_writer.bfc";
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -310,9 +312,9 @@ static int test_end_to_end_encryption(void) {
   char test_filename[256];
   char extract_filename[256];
   int pid = getpid();
-  snprintf(container_filename, sizeof(container_filename), "/tmp/encrypt_e2e_%d.bfc", pid);
-  snprintf(test_filename, sizeof(test_filename), "/tmp/encrypt_e2e_input_%d.txt", pid);
-  snprintf(extract_filename, sizeof(extract_filename), "/tmp/encrypt_e2e_output_%d.txt", pid);
+  snprintf(container_filename, sizeof(container_filename), "encrypt_e2e_%d.bfc", pid);
+  snprintf(test_filename, sizeof(test_filename), "encrypt_e2e_input_%d.txt", pid);
+  snprintf(extract_filename, sizeof(extract_filename), "encrypt_e2e_output_%d.txt", pid);
 
   // Clean up any existing files
   unlink(container_filename);
@@ -320,7 +322,7 @@ static int test_end_to_end_encryption(void) {
   unlink(extract_filename);
 
   // Create test input file with sensitive content
-  FILE* input_file = fopen(test_filename, "w");
+  FILE* input_file = fopen(test_filename, "wb");
   assert(input_file != NULL);
 
   const char* sensitive_content =
@@ -358,7 +360,11 @@ static int test_end_to_end_encryption(void) {
   assert(result == BFC_OK);
 
   // Try to extract without password (should fail)
+#ifdef _WIN32
+  int out_fd = open(extract_filename, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
+#else
   int out_fd = open(extract_filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
   assert(out_fd >= 0);
 
   result = bfc_extract_to_fd(reader, "secret_file.txt", out_fd);
@@ -377,7 +383,11 @@ static int test_end_to_end_encryption(void) {
   assert(entry.enc == BFC_ENC_CHACHA20_POLY1305);
 
   // Extract with correct password
+#ifdef _WIN32
+  out_fd = open(extract_filename, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
+#else
   out_fd = open(extract_filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
   assert(out_fd >= 0);
 
   result = bfc_extract_to_fd(reader, "secret_file.txt", out_fd);
@@ -448,9 +458,9 @@ static int test_encryption_with_compression(void) {
   char test_filename[256];
   char extract_filename[256];
   int pid = getpid();
-  snprintf(container_filename, sizeof(container_filename), "/tmp/encrypt_compress_%d.bfc", pid);
-  snprintf(test_filename, sizeof(test_filename), "/tmp/encrypt_compress_input_%d.txt", pid);
-  snprintf(extract_filename, sizeof(extract_filename), "/tmp/encrypt_compress_output_%d.txt", pid);
+  snprintf(container_filename, sizeof(container_filename), "encrypt_compress_%d.bfc", pid);
+  snprintf(test_filename, sizeof(test_filename), "encrypt_compress_input_%d.txt", pid);
+  snprintf(extract_filename, sizeof(extract_filename), "encrypt_compress_output_%d.txt", pid);
 
   // Clean up any existing files
   unlink(container_filename);
@@ -458,7 +468,7 @@ static int test_encryption_with_compression(void) {
   unlink(extract_filename);
 
   // Create test input file with compressible content
-  FILE* input_file = fopen(test_filename, "w");
+  FILE* input_file = fopen(test_filename, "wb");
   assert(input_file != NULL);
 
   // Write highly compressible content
@@ -519,7 +529,11 @@ static int test_encryption_with_compression(void) {
 #endif
 
   // Extract and verify content
+#ifdef _WIN32
+  int out_fd = open(extract_filename, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
+#else
   int out_fd = open(extract_filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
   assert(out_fd >= 0);
 
   result = bfc_extract_to_fd(reader, "compress_encrypt_file.txt", out_fd);
@@ -528,8 +542,8 @@ static int test_encryption_with_compression(void) {
   bfc_close_read(reader);
 
   // Compare original and extracted files
-  FILE* orig = fopen(test_filename, "r");
-  FILE* extracted = fopen(extract_filename, "r");
+  FILE* orig = fopen(test_filename, "rb");
+  FILE* extracted = fopen(extract_filename, "rb");
   assert(orig != NULL);
   assert(extracted != NULL);
 
@@ -578,12 +592,12 @@ static int test_has_encryption_detection(void) {
   char encrypted_container[256];
   char test_file[256];
   int pid = getpid();
-  snprintf(unencrypted_container, sizeof(unencrypted_container), "/tmp/test_unenc_%d.bfc", pid);
-  snprintf(encrypted_container, sizeof(encrypted_container), "/tmp/test_enc_%d.bfc", pid);
-  snprintf(test_file, sizeof(test_file), "/tmp/test_file_%d.txt", pid);
+  snprintf(unencrypted_container, sizeof(unencrypted_container), "test_unenc_%d.bfc", pid);
+  snprintf(encrypted_container, sizeof(encrypted_container), "test_enc_%d.bfc", pid);
+  snprintf(test_file, sizeof(test_file), "test_file_%d.txt", pid);
 
   // Create test file
-  FILE* f = fopen(test_file, "w");
+  FILE* f = fopen(test_file, "wb");
   assert(f);
   fprintf(f, "Test content for encryption detection");
   fclose(f);
@@ -593,7 +607,7 @@ static int test_has_encryption_detection(void) {
   int result = bfc_create(unencrypted_container, 4096, 0, &writer);
   assert(result == BFC_OK);
 
-  FILE* src = fopen(test_file, "r");
+  FILE* src = fopen(test_file, "rb");
   assert(src);
   result = bfc_add_file(writer, "test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
   assert(result == BFC_OK);
@@ -623,7 +637,7 @@ static int test_has_encryption_detection(void) {
   result = bfc_set_encryption_password(writer, password, strlen(password));
   assert(result == BFC_OK);
 
-  src = fopen(test_file, "r");
+  src = fopen(test_file, "rb");
   assert(src);
   result = bfc_add_file(writer, "test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
   assert(result == BFC_OK);
@@ -659,11 +673,11 @@ static int test_encryption_error_paths(void) {
   char container_filename[256];
   char test_filename[256];
   int pid = getpid();
-  snprintf(container_filename, sizeof(container_filename), "/tmp/test_err_%d.bfc", pid);
-  snprintf(test_filename, sizeof(test_filename), "/tmp/test_err_file_%d.txt", pid);
+  snprintf(container_filename, sizeof(container_filename), "test_err_%d.bfc", pid);
+  snprintf(test_filename, sizeof(test_filename), "test_err_file_%d.txt", pid);
 
   // Create test file
-  FILE* f = fopen(test_filename, "w");
+  FILE* f = fopen(test_filename, "wb");
   assert(f);
   fprintf(f, "Error test content");
   fclose(f);
@@ -678,7 +692,7 @@ static int test_encryption_error_paths(void) {
   result = bfc_set_encryption_key(writer, test_key);
   assert(result == BFC_OK);
 
-  FILE* src = fopen(test_filename, "r");
+  FILE* src = fopen(test_filename, "rb");
   assert(src);
   result = bfc_add_file(writer, "test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
   assert(result == BFC_OK);
@@ -700,12 +714,16 @@ static int test_encryption_error_paths(void) {
   assert(bfc_has_encryption(reader) == 1);
 
   // Test extraction with correct key
-  int fd = open("/tmp/test_extract.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#ifdef _WIN32
+  int fd = open("test_extract.txt", O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
+#else
+  int fd = open("test_extract.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
   assert(fd >= 0);
   result = bfc_extract_to_fd(reader, "test.txt", fd);
   assert(result == BFC_OK);
   close(fd);
-  unlink("/tmp/test_extract.txt");
+  unlink("test_extract.txt");
 
   bfc_close_read(reader);
 
@@ -720,12 +738,16 @@ static int test_encryption_error_paths(void) {
   assert(result == BFC_OK);
 
   // Try to extract with wrong key - should fail
-  fd = open("/tmp/test_extract_fail.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#ifdef _WIN32
+  fd = open("test_extract_fail.txt", O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
+#else
+  fd = open("test_extract_fail.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
   assert(fd >= 0);
   result = bfc_extract_to_fd(reader, "test.txt", fd);
   assert(result != BFC_OK); // Should fail with wrong key
   close(fd);
-  unlink("/tmp/test_extract_fail.txt");
+  unlink("test_extract_fail.txt");
 
   bfc_close_read(reader);
 
@@ -743,11 +765,11 @@ static int test_additional_encryption_coverage(void) {
   char container_filename[256];
   char test_filename[256];
   int pid = getpid();
-  snprintf(container_filename, sizeof(container_filename), "/tmp/test_additional_%d.bfc", pid);
-  snprintf(test_filename, sizeof(test_filename), "/tmp/test_additional_file_%d.txt", pid);
+  snprintf(container_filename, sizeof(container_filename), "test_additional_%d.bfc", pid);
+  snprintf(test_filename, sizeof(test_filename), "test_additional_file_%d.txt", pid);
 
   // Create a larger test file to trigger more code paths
-  FILE* f = fopen(test_filename, "w");
+  FILE* f = fopen(test_filename, "wb");
   assert(f);
   for (int i = 0; i < 1000; i++) {
     fprintf(f,
@@ -771,7 +793,7 @@ static int test_additional_encryption_coverage(void) {
   result = bfc_set_encryption_password(writer, password, strlen(password));
   assert(result == BFC_OK);
 
-  FILE* src = fopen(test_filename, "r");
+  FILE* src = fopen(test_filename, "rb");
   assert(src);
   result = bfc_add_file(writer, "large_test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
   assert(result == BFC_OK);
@@ -851,11 +873,11 @@ static int test_encryption_key_edge_cases(void) {
   char container_filename[256];
   char test_filename[256];
   int pid = getpid();
-  snprintf(container_filename, sizeof(container_filename), "/tmp/test_key_edge_%d.bfc", pid);
-  snprintf(test_filename, sizeof(test_filename), "/tmp/test_key_edge_file_%d.txt", pid);
+  snprintf(container_filename, sizeof(container_filename), "test_key_edge_%d.bfc", pid);
+  snprintf(test_filename, sizeof(test_filename), "test_key_edge_file_%d.txt", pid);
 
   // Create test file
-  FILE* f = fopen(test_filename, "w");
+  FILE* f = fopen(test_filename, "wb");
   assert(f);
   fprintf(f, "Key edge case test content");
   fclose(f);
@@ -873,7 +895,7 @@ static int test_encryption_key_edge_cases(void) {
   result = bfc_set_encryption_key(writer, key);
   assert(result == BFC_OK);
 
-  FILE* src = fopen(test_filename, "r");
+  FILE* src = fopen(test_filename, "rb");
   assert(src);
   result = bfc_add_file(writer, "key_test.txt", src, 0644, bfc_os_current_time_ns(), NULL);
   assert(result == BFC_OK);
@@ -902,7 +924,7 @@ static int test_encryption_key_edge_cases(void) {
 
   // Test clearing encryption (for writer coverage)
   writer = NULL;
-  result = bfc_create("/tmp/test_clear_enc.bfc", 4096, 0, &writer);
+  result = bfc_create("test_clear_enc.bfc", 4096, 0, &writer);
   assert(result == BFC_OK);
 
   result = bfc_set_encryption_password(writer, "temp", 4);
@@ -915,7 +937,7 @@ static int test_encryption_key_edge_cases(void) {
   assert(bfc_get_encryption(writer) == BFC_ENC_NONE);
 
   bfc_close(writer);
-  unlink("/tmp/test_clear_enc.bfc");
+  unlink("test_clear_enc.bfc");
 
   // Clean up
   unlink(container_filename);
