@@ -49,7 +49,9 @@ endif()
 
 # Add OCI support if enabled (needed for OCI tests)
 if(BFC_WITH_OCI)
+    target_link_libraries(unit_tests ${CJSON_LIBRARIES})
     target_compile_definitions(unit_tests PRIVATE BFC_WITH_OCI)
+    target_include_directories(unit_tests PRIVATE ${CJSON_INCLUDE_DIRS})
 endif()
 
 target_include_directories(unit_tests PRIVATE

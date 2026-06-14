@@ -85,7 +85,9 @@ foreach(target bfc bfc_shared)
     endif()
 
     if(BFC_WITH_OCI)
+        target_link_libraries(${target} ${CJSON_LIBRARIES})
         target_compile_definitions(${target} PRIVATE BFC_WITH_OCI)
+        target_include_directories(${target} PRIVATE ${CJSON_INCLUDE_DIRS})
     endif()
 endforeach()
 

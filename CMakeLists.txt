@@ -71,6 +71,12 @@ if(BFC_WITH_SODIUM)
     message(STATUS "libsodium encryption support enabled")
 endif()
 
+if(BFC_WITH_OCI)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(CJSON REQUIRED libcjson)
+    message(STATUS "OCI image-specs support enabled")
+endif()
+
 # Include directories
 include_directories(include)
 

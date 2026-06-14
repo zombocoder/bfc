@@ -383,6 +383,95 @@ static int test_free_functions_null(void) {
   return 0;
 }
 
+// Round-trip: write a manifest (+config) then read it back and verify fields.
+static int test_oci_manifest_roundtrip(void) {
+  const char* filename = "/tmp/test_oci_roundtrip.bfc";
+  unlink(filename);
+
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  if (result != BFC_OK) {
+    return 0; // skip if can't create
+  }
+
+  bfc_oci_manifest_t in = {0};
+  in.schema_version = strdup(BFC_OCI_SCHEMA_VERSION);
+  in.media_type = strdup(BFC_OCI_MEDIA_TYPE_MANIFEST);
+  in.config_digest = strdup("sha256:1111111111111111111111111111111111111111111111111111111111111111");
+  in.config_size = 512;
+  in.layer_count = 2;
+  in.layer_digests = calloc(2, sizeof(char*));
+  in.layer_digests[0] = strdup("sha256:2222222222222222222222222222222222222222222222222222222222222222");
+  in.layer_digests[1] = strdup("sha256:3333333333333333333333333333333333333333333333333333333333333333");
+
+  const char* config_json = "{\"architecture\":\"amd64\",\"os\":\"linux\"}";
+  result = bfc_create_from_oci_manifest(writer, &in, config_json);
+  assert(result == BFC_OK);
+  assert(bfc_finish(writer) == BFC_OK);
+  bfc_close(writer);
+
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+
+  // Manifest round-trips with all fields intact.
+  bfc_oci_manifest_t out = {0};
+  result = bfc_get_oci_manifest(reader, &out);
+  assert(result == BFC_OK);
+  assert(out.schema_version && strcmp(out.schema_version, BFC_OCI_SCHEMA_VERSION) == 0);
+  assert(out.media_type && strcmp(out.media_type, BFC_OCI_MEDIA_TYPE_MANIFEST) == 0);
+  assert(out.config_digest && strcmp(out.config_digest, in.config_digest) == 0);
+  assert(out.config_size == in.config_size);
+  assert(out.layer_count == 2);
+  assert(out.layer_digests[0] && strcmp(out.layer_digests[0], in.layer_digests[0]) == 0);
+  assert(out.layer_digests[1] && strcmp(out.layer_digests[1], in.layer_digests[1]) == 0);
+  assert(bfc_validate_oci_manifest(&out) == BFC_OK);
+  free(out.schema_version);
+  free(out.media_type);
+  free(out.config_digest);
+  for (size_t i = 0; i < out.layer_count; i++) {
+    free(out.layer_digests[i]);
+  }
+  free(out.layer_digests);
+
+  // Layer listing round-trips.
+  bfc_oci_layer_t* layers = NULL;
+  size_t layer_count = 0;
+  result = bfc_list_oci_layers(reader, &layers, &layer_count);
+  assert(result == BFC_OK);
+  assert(layer_count == 2);
+  assert(layers[0].digest && strcmp(layers[0].digest, in.layer_digests[0]) == 0);
+  assert(layers[1].digest && strcmp(layers[1].digest, in.layer_digests[1]) == 0);
+  for (size_t i = 0; i < layer_count; i++) {
+    free(layers[i].digest);
+    free(layers[i].media_type);
+  }
+  free(layers);
+
+  // Config round-trips.
+  bfc_oci_config_t cfg = {0};
+  result = bfc_get_oci_config(reader, &cfg);
+  assert(result == BFC_OK);
+  assert(cfg.architecture && strcmp(cfg.architecture, "amd64") == 0);
+  assert(cfg.os && strcmp(cfg.os, "linux") == 0);
+  assert(bfc_validate_oci_config(&cfg) == BFC_OK);
+  free(cfg.architecture);
+  free(cfg.os);
+  free(cfg.created);
+  free(cfg.author);
+
+  bfc_close_read(reader);
+
+  free(in.schema_version);
+  free(in.media_type);
+  free(in.config_digest);
+  free(in.layer_digests[0]);
+  free(in.layer_digests[1]);
+  free(in.layer_digests);
+  unlink(filename);
+  return 0;
+}
+
 // Main test function
 int test_oci(void) {
   printf("Running OCI tests...\n");
@@ -407,6 +496,8 @@ int test_oci(void) {
   test_get_oci_config_null_args();
   test_list_oci_layers_null_args();
   test_extract_to_oci_null_args();
+
+  test_oci_manifest_roundtrip();
 
   test_free_functions_null();
 

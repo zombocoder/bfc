@@ -18,6 +18,7 @@
 #define _GNU_SOURCE /* strdup, fmemopen */
 
 #include "bfc_oci.h"
+#include <cjson/cJSON.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -27,6 +28,46 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+// Read an entire container entry into a NUL-terminated heap buffer.
+static int oci_read_entry(bfc_t* bfc, const char* path, char** out, size_t* out_len) {
+  bfc_entry_t e;
+  if (bfc_stat(bfc, path, &e) != BFC_OK) {
+    return BFC_E_NOTFOUND;
+  }
+  char* buf = malloc((size_t) e.size + 1);
+  if (!buf) {
+    return BFC_E_IO;
+  }
+  size_t n = (e.size > 0) ? bfc_read(bfc, path, 0, buf, (size_t) e.size) : 0;
+  if (n != (size_t) e.size) {
+    free(buf);
+    return BFC_E_IO;
+  }
+  buf[e.size] = '\0';
+  *out = buf;
+  *out_len = (size_t) e.size;
+  return BFC_OK;
+}
+
+// schemaVersion is an integer in JSON; we store it as a string ("2").
+static char* oci_dup_schema_version(const cJSON* root) {
+  const cJSON* sv = cJSON_GetObjectItemCaseSensitive(root, "schemaVersion");
+  if (cJSON_IsNumber(sv)) {
+    char tmp[32];
+    snprintf(tmp, sizeof(tmp), "%d", (int) sv->valuedouble);
+    return strdup(tmp);
+  }
+  if (cJSON_IsString(sv) && sv->valuestring) {
+    return strdup(sv->valuestring);
+  }
+  return NULL;
+}
+
+static char* oci_dup_str_field(const cJSON* obj, const char* key) {
+  const cJSON* it = cJSON_GetObjectItemCaseSensitive(obj, key);
+  return (cJSON_IsString(it) && it->valuestring) ? strdup(it->valuestring) : NULL;
+}
 
 // Callback to collect all file entries for extraction
 struct extract_context {
@@ -347,11 +388,47 @@ int bfc_get_oci_manifest(bfc_t* bfc, bfc_oci_manifest_t* manifest) {
     return BFC_E_INVAL;
   }
 
-  // Not yet implemented: parsing manifest.json back into bfc_oci_manifest_t
-  // requires a JSON parser (BFC stores the raw manifest bytes on the write path).
-  // Return an honest "not implemented" instead of a false success with an
-  // unpopulated struct. Tracked as follow-up.
-  return BFC_E_NOSYS;
+  char* buf = NULL;
+  size_t len = 0;
+  int rc = oci_read_entry(bfc, "manifest.json", &buf, &len);
+  if (rc != BFC_OK) {
+    return rc;
+  }
+
+  cJSON* root = cJSON_ParseWithLength(buf, len);
+  free(buf);
+  if (!root) {
+    return BFC_E_INVAL;
+  }
+
+  memset(manifest, 0, sizeof(*manifest));
+  manifest->schema_version = oci_dup_schema_version(root);
+  manifest->media_type = oci_dup_str_field(root, "mediaType");
+
+  const cJSON* cfg = cJSON_GetObjectItemCaseSensitive(root, "config");
+  if (cJSON_IsObject(cfg)) {
+    manifest->config_digest = oci_dup_str_field(cfg, "digest");
+    const cJSON* sz = cJSON_GetObjectItemCaseSensitive(cfg, "size");
+    if (cJSON_IsNumber(sz)) {
+      manifest->config_size = (size_t) sz->valuedouble;
+    }
+  }
+
+  const cJSON* layers = cJSON_GetObjectItemCaseSensitive(root, "layers");
+  int n = cJSON_IsArray(layers) ? cJSON_GetArraySize(layers) : 0;
+  if (n > 0) {
+    manifest->layer_digests = calloc((size_t) n, sizeof(char*));
+    if (manifest->layer_digests) {
+      for (int i = 0; i < n; i++) {
+        const cJSON* item = cJSON_GetArrayItem(layers, i);
+        char* d = cJSON_IsObject(item) ? oci_dup_str_field(item, "digest") : NULL;
+        manifest->layer_digests[manifest->layer_count++] = d ? d : strdup("");
+      }
+    }
+  }
+
+  cJSON_Delete(root);
+  return BFC_OK;
 }
 
 // Get OCI config from BFC container
@@ -360,9 +437,27 @@ int bfc_get_oci_config(bfc_t* bfc, bfc_oci_config_t* config) {
     return BFC_E_INVAL;
   }
 
-  // Not yet implemented: parsing config.json into bfc_oci_config_t needs a
-  // JSON parser. Return an honest "not implemented" rather than false success.
-  return BFC_E_NOSYS;
+  char* buf = NULL;
+  size_t len = 0;
+  int rc = oci_read_entry(bfc, "config.json", &buf, &len);
+  if (rc != BFC_OK) {
+    return rc;
+  }
+
+  cJSON* root = cJSON_ParseWithLength(buf, len);
+  free(buf);
+  if (!root) {
+    return BFC_E_INVAL;
+  }
+
+  memset(config, 0, sizeof(*config));
+  config->architecture = oci_dup_str_field(root, "architecture");
+  config->os = oci_dup_str_field(root, "os");
+  config->created = oci_dup_str_field(root, "created");
+  config->author = oci_dup_str_field(root, "author");
+
+  cJSON_Delete(root);
+  return BFC_OK;
 }
 
 // List OCI layers in BFC container
@@ -371,12 +466,46 @@ int bfc_list_oci_layers(bfc_t* bfc, bfc_oci_layer_t** layers, size_t* layer_coun
     return BFC_E_INVAL;
   }
 
-  // Not yet implemented: listing layers requires parsing manifest.json.
-  // Initialize outputs and return an honest "not implemented".
   *layers = NULL;
   *layer_count = 0;
 
-  return BFC_E_NOSYS;
+  char* buf = NULL;
+  size_t len = 0;
+  int rc = oci_read_entry(bfc, "manifest.json", &buf, &len);
+  if (rc != BFC_OK) {
+    return rc;
+  }
+
+  cJSON* root = cJSON_ParseWithLength(buf, len);
+  free(buf);
+  if (!root) {
+    return BFC_E_INVAL;
+  }
+
+  const cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, "layers");
+  int n = cJSON_IsArray(arr) ? cJSON_GetArraySize(arr) : 0;
+  if (n > 0) {
+    bfc_oci_layer_t* out = calloc((size_t) n, sizeof(bfc_oci_layer_t));
+    if (!out) {
+      cJSON_Delete(root);
+      return BFC_E_IO;
+    }
+    for (int i = 0; i < n; i++) {
+      const cJSON* item = cJSON_GetArrayItem(arr, i);
+      char* d = cJSON_IsObject(item) ? oci_dup_str_field(item, "digest") : NULL;
+      out[i].digest = d ? d : strdup("");
+      out[i].media_type = cJSON_IsObject(item) ? oci_dup_str_field(item, "mediaType") : NULL;
+      const cJSON* sz = cJSON_IsObject(item) ? cJSON_GetObjectItemCaseSensitive(item, "size") : NULL;
+      if (cJSON_IsNumber(sz)) {
+        out[i].size = (size_t) sz->valuedouble;
+      }
+    }
+    *layers = out;
+    *layer_count = (size_t) n;
+  }
+
+  cJSON_Delete(root);
+  return BFC_OK;
 }
 
 // Validate OCI manifest
