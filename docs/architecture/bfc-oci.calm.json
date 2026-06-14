@@ -1,0 +1,21 @@
+{
+  "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
+  "nodes": [
+    { "unique-id": "cli-user", "node-type": "actor", "name": "CLI User", "description": "Operator invoking the bfc CLI to pack/inspect OCI images." },
+    { "unique-id": "bfc-cli", "node-type": "system", "name": "bfc CLI", "description": "Command-line front end (src/cli: cmd_create, cmd_extract, cmd_list, cmd_info, cmd_verify)." },
+    { "unique-id": "bfc-oci", "node-type": "service", "name": "BFC OCI module", "description": "src/lib/bfc_oci.c — OCI image-spec layer. GATED behind BFC_WITH_OCI (must default OFF). Write path implemented; READ path (get_oci_manifest/config, list_oci_layers) is stubbed (TODO)." },
+    { "unique-id": "bfc-core", "node-type": "service", "name": "BFC core", "description": "Container engine (bfc_reader/bfc_writer/bfc_format). Public primitives used by OCI: bfc_add_file, bfc_extract_to_fd, bfc_stat, bfc_list." },
+    { "unique-id": "bfc-os", "node-type": "service", "name": "BFC OS layer", "description": "src/lib/bfc_os.c — platform/file IO abstraction." },
+    { "unique-id": "oci-data-model", "node-type": "system", "name": "OCI data model", "description": "include/bfc_oci.h structs: bfc_oci_manifest_t, bfc_oci_config_t, bfc_oci_layer_t, bfc_oci_index_t." },
+    { "unique-id": "oci-image-spec", "node-type": "system", "name": "OCI Image Spec", "description": "External Open Container Initiative image specification the module conforms to." }
+  ],
+  "relationships": [
+    { "unique-id": "user-to-cli", "description": "Invokes pack/inspect commands", "relationship-type": { "connects": { "source": { "node": "cli-user" }, "destination": { "node": "bfc-cli" } } }, "protocol": "CLI" },
+    { "unique-id": "cli-to-oci", "description": "Calls OCI ops when BFC_WITH_OCI=ON (gated, default OFF)", "relationship-type": { "connects": { "source": { "node": "bfc-cli" }, "destination": { "node": "bfc-oci" } } }, "protocol": "in-process C API" },
+    { "unique-id": "oci-to-core-write", "description": "Write path: bfc_add_file (layers/manifest), bfc_add_oci_layer", "relationship-type": { "connects": { "source": { "node": "bfc-oci" }, "destination": { "node": "bfc-core" } } }, "protocol": "in-process C API" },
+    { "unique-id": "oci-to-core-read", "description": "Read path: bfc_extract_to_fd, bfc_stat, bfc_list — INVOKED but enclosing get_oci_* funcs are STUBBED (return BFC_OK without populating)", "relationship-type": { "connects": { "source": { "node": "bfc-oci" }, "destination": { "node": "bfc-core" } } }, "protocol": "in-process C API" },
+    { "unique-id": "oci-to-datamodel", "description": "Operates on OCI manifest/config/layer/index structs", "relationship-type": { "connects": { "source": { "node": "bfc-oci" }, "destination": { "node": "oci-data-model" } } }, "protocol": "struct" },
+    { "unique-id": "core-to-os", "description": "Platform file IO", "relationship-type": { "connects": { "source": { "node": "bfc-core" }, "destination": { "node": "bfc-os" } } }, "protocol": "in-process C API" },
+    { "unique-id": "oci-conforms-spec", "description": "Conforms to the OCI image specification", "relationship-type": { "connects": { "source": { "node": "bfc-oci" }, "destination": { "node": "oci-image-spec" } } }, "protocol": "spec-conformance" }
+  ]
+}
