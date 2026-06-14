@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#define _GNU_SOURCE /* strdup */
+
 #include <stdio.h>
 
 #ifdef BFC_WITH_OCI
@@ -332,7 +334,7 @@ static int test_get_oci_config_null_args(void) {
 }
 
 static int test_list_oci_layers_null_args(void) {
-  bfc_oci_layer_t** layers = NULL;
+  bfc_oci_layer_t* layers = NULL;
   size_t layer_count = 0;
 
   // Test with NULL bfc

@@ -122,7 +122,7 @@ void bfc_free_oci_layers(bfc_oci_layer_t** layers, size_t layer_count);
 #define BFC_OCI_MEDIA_TYPE_LAYER_ZSTD "application/vnd.oci.image.layer.v1.tar+zstd"
 #define BFC_OCI_MEDIA_TYPE_INDEX "application/vnd.oci.image.index.v1+json"
 
-#define BFC_OCI_SCHEMA_VERSION "2.0.1"
+#define BFC_OCI_SCHEMA_VERSION "2" /* OCI image-manifest schemaVersion MUST be 2 (per OCI image-spec) */
 
 #ifdef __cplusplus
 }
