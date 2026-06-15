@@ -28,62 +28,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-// OCI constants (should be in bfc_oci.h but defining here for tests)
-#define BFC_OCI_SCHEMA_VERSION "2"
-#define BFC_OCI_MEDIA_TYPE_MANIFEST "application/vnd.oci.image.manifest.v1+json"
-
-// OCI structure definitions (mock structures for testing)
-typedef struct {
-  char* schema_version;
-  char* media_type;
-  char* config_digest;
-  char** layer_digests;
-  size_t layer_count;
-  char* annotations;
-} bfc_oci_manifest_t;
-
-typedef struct {
-  char* architecture;
-  char* os;
-  char* created;
-  char* author;
-  char* config;
-  char* rootfs;
-  char* history;
-} bfc_oci_config_t;
-
-typedef struct {
-  char* digest;
-  char* media_type;
-  char* annotations;
-  char** urls;
-  size_t url_count;
-} bfc_oci_layer_t;
-
-typedef struct {
-  char* schema_version;
-  char* media_type;
-  char* annotations;
-  bfc_oci_manifest_t** manifests;
-  size_t manifest_count;
-} bfc_oci_index_t;
-
-// Forward declarations
-extern int bfc_create_from_oci_manifest(bfc_t* bfc, const bfc_oci_manifest_t* manifest,
-                                        const char* config_json);
-extern int bfc_create_from_oci_index(bfc_t* bfc, const bfc_oci_index_t* index);
-extern int bfc_add_oci_layer(bfc_t* bfc, const bfc_oci_layer_t* layer, FILE* layer_data);
-extern int bfc_extract_to_oci(bfc_t* bfc, const char* output_dir);
-extern int bfc_get_oci_manifest(bfc_t* bfc, bfc_oci_manifest_t* manifest);
-extern int bfc_get_oci_config(bfc_t* bfc, bfc_oci_config_t* config);
-extern int bfc_list_oci_layers(bfc_t* bfc, bfc_oci_layer_t** layers, size_t* layer_count);
-extern int bfc_validate_oci_manifest(const bfc_oci_manifest_t* manifest);
-extern int bfc_validate_oci_config(const bfc_oci_config_t* config);
-extern void bfc_free_oci_manifest(bfc_oci_manifest_t* manifest);
-extern void bfc_free_oci_config(bfc_oci_config_t* config);
-extern void bfc_free_oci_layer(bfc_oci_layer_t* layer);
-extern void bfc_free_oci_index(bfc_oci_index_t* index);
-extern void bfc_free_oci_layers(bfc_oci_layer_t** layers, size_t layer_count);
+// Use the real OCI types, constants, and declarations — not local mocks, which
+// previously drifted from the header (wrong struct layout => UB when passed to
+// the library functions).
+#include <bfc_oci.h>
 
 static int test_validate_oci_manifest_null(void) {
   // Test with NULL manifest

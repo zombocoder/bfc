@@ -47,27 +47,6 @@ static int read_key_from_file(const char* keyfile, uint8_t key[32]) {
 }
 #endif
 
-#ifdef BFC_WITH_SODIUM
-// Function to read encryption key from file
-static int read_key_from_file(const char* keyfile, uint8_t key[32]) {
-  FILE* f = fopen(keyfile, "rb");
-  if (!f) {
-    print_error("Cannot open key file '%s': %s", keyfile, strerror(errno));
-    return -1;
-  }
-
-  size_t bytes_read = fread(key, 1, 32, f);
-  fclose(f);
-
-  if (bytes_read != 32) {
-    print_error("Key file '%s' must contain exactly 32 bytes (got %zu)", keyfile, bytes_read);
-    return -1;
-  }
-
-  return 0;
-}
-#endif
-
 typedef struct {
   uint32_t block_size;
   int force;

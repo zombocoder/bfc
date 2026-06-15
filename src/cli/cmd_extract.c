@@ -49,26 +49,6 @@ static int read_key_from_file(const char* filename, uint8_t key[32]) {
 }
 #endif
 
-#ifdef BFC_WITH_SODIUM
-static int read_key_from_file(const char* filename, uint8_t key[32]) {
-  int fd = open(filename, O_RDONLY);
-  if (fd < 0) {
-    print_error("Cannot open key file '%s': %s", filename, strerror(errno));
-    return -1;
-  }
-
-  ssize_t bytes_read = read(fd, key, 32);
-  close(fd);
-
-  if (bytes_read != 32) {
-    print_error("Key file '%s' must be exactly 32 bytes, got %zd bytes", filename, bytes_read);
-    return -1;
-  }
-
-  return 0;
-}
-#endif
-
 typedef struct {
   int force;
   int preserve_paths;
