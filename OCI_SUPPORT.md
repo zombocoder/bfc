@@ -15,6 +15,28 @@ BFC now supports storing and managing OCI container images in its efficient sing
 - **Validation**: Validate OCI manifests and configs
 - **Extraction**: Extract BFC containers to OCI format
 
+## Building
+
+OCI support is opt-in and **off by default**. Enable it with `-DBFC_WITH_OCI=ON`.
+It requires **libcjson** (used to read manifests/configs back), detected via
+pkg-config like the other optional dependencies:
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install libcjson-dev
+# FreeBSD
+sudo pkg install libcjson
+# Windows (vcpkg)
+vcpkg install cjson:x64-windows
+
+cmake -B build -DBFC_WITH_OCI=ON
+cmake --build build
+```
+
+The write path serializes manifests/indexes to JSON; the read path
+(`bfc_get_oci_manifest`/`bfc_get_oci_config`/`bfc_list_oci_layers`) parses them
+back with libcjson.
+
 ## API Reference
 
 ### OCI Manifest Functions

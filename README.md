@@ -52,6 +52,7 @@ cmake --build build
 **Optional dependencies:**
 - ZSTD library for compression support
 - libsodium for encryption support
+- libcjson for OCI image-specs support (`-DBFC_WITH_OCI=ON`)
 - pkg-config (or pkgconf on FreeBSD/Linux) for dependency detection on Unix
 - vcpkg for dependency management on Windows
 
@@ -128,6 +129,7 @@ cmake --build build
 cmake -B build -DBFC_WITH_ZSTD=ON        # Compression only
 cmake -B build -DBFC_WITH_SODIUM=ON      # Encryption only  
 cmake -B build -DBFC_WITH_FUSE=ON        # FUSE filesystem support
+cmake -B build -DBFC_WITH_OCI=ON         # OCI image-specs (requires libcjson)
 
 # Enable code coverage
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBFC_COVERAGE=ON
