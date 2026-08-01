@@ -532,6 +532,91 @@ static size_t read_compressed_file(bfc_t* r, bfc_reader_entry_t* entry, uint64_t
   return copy_size;
 }
 
+// Read an encrypted, uncompressed object. AEAD covers the whole object, so the
+// entire payload has to be decrypted before any slice can be returned.
+static size_t read_encrypted_file(bfc_t* r, bfc_reader_entry_t* entry, uint64_t offset, void* buf,
+                                  size_t len) {
+  if (!r->has_encryption_key) {
+    return 0; // No decryption key available
+  }
+
+  // Calculate content start position
+  if (bfc_os_seek(r->file, (int64_t) entry->obj_offset, SEEK_SET) != BFC_OK) {
+    return 0;
+  }
+
+  struct bfc_obj_hdr obj_hdr;
+  if (fread(&obj_hdr, 1, sizeof(obj_hdr), r->file) != sizeof(obj_hdr)) {
+    return 0;
+  }
+
+  // Skip name and padding to get to content
+  uint16_t name_len = obj_hdr.name_len;
+  if (fseek(r->file, name_len, SEEK_CUR) != 0) {
+    return 0;
+  }
+
+  size_t hdr_name_size = sizeof(obj_hdr) + name_len;
+  size_t padding = bfc_padding_size(hdr_name_size, BFC_ALIGN);
+  if (padding > 0 && fseek(r->file, (long) padding, SEEK_CUR) != 0) {
+    return 0;
+  }
+
+  void* encrypted_data = malloc(obj_hdr.enc_size);
+  if (!encrypted_data) {
+    return 0;
+  }
+
+  size_t encrypted_read = fread(encrypted_data, 1, obj_hdr.enc_size, r->file);
+  if (encrypted_read != obj_hdr.enc_size) {
+    free(encrypted_data);
+    return 0;
+  }
+
+  // Create decryption key structure
+  bfc_encrypt_key_t decrypt_key;
+  if (bfc_encrypt_key_from_bytes(r->encryption_key, &decrypt_key) != BFC_OK) {
+    free(encrypted_data);
+    return 0;
+  }
+
+  bfc_decrypt_result_t decrypt_result = bfc_decrypt_data(
+      &decrypt_key, encrypted_data, obj_hdr.enc_size, entry->path, strlen(entry->path), 0);
+  bfc_encrypt_key_clear(&decrypt_key);
+  free(encrypted_data);
+
+  if (decrypt_result.error != BFC_OK || !decrypt_result.data) {
+    return 0;
+  }
+
+  // Validate CRC of decrypted data
+  bfc_crc32c_ctx_t crc_ctx;
+  bfc_crc32c_reset(&crc_ctx);
+  bfc_crc32c_update(&crc_ctx, decrypt_result.data, decrypt_result.decrypted_size);
+  uint32_t calculated_crc = bfc_crc32c_final(&crc_ctx);
+
+  if (calculated_crc != entry->crc32c) {
+    free(decrypt_result.data);
+    return 0;
+  }
+
+  if (offset >= decrypt_result.decrypted_size) {
+    free(decrypt_result.data);
+    return 0;
+  }
+
+  // Copy requested portion to output buffer
+  size_t copy_size = len;
+  if (offset + copy_size > decrypt_result.decrypted_size) {
+    copy_size = decrypt_result.decrypted_size - offset;
+  }
+
+  memcpy(buf, (uint8_t*) decrypt_result.data + offset, copy_size);
+  free(decrypt_result.data);
+
+  return copy_size;
+}
+
 size_t bfc_read(bfc_t* r, const char* container_path, uint64_t offset, void* buf, size_t len) {
   if (!r || !container_path || !buf || len == 0) {
     return 0;
@@ -573,6 +658,13 @@ size_t bfc_read(bfc_t* r, const char* container_path, uint64_t offset, void* buf
     // For compressed files, we need to decompress the entire file
     // and then return the requested portion
     return read_compressed_file(r, entry, offset, buf, to_read);
+  }
+
+  // Handle encrypted (but uncompressed) files. Without this the raw ciphertext
+  // would be returned to the caller, and a wrong key would go unnoticed because
+  // the AEAD tag would never be checked.
+  if (entry->enc != BFC_ENC_NONE) {
+    return read_encrypted_file(r, entry, offset, buf, to_read);
   }
 
   // Calculate file position
