@@ -24,6 +24,10 @@ set(BFC_CLI_SOURCES
 
 add_executable(bfc_cli ${BFC_CLI_SOURCES})
 
+# Keep `bfc --version` in step with project(bfc VERSION ...). It used to be a
+# hardcoded literal and had drifted three minor versions behind the tags.
+target_compile_definitions(bfc_cli PRIVATE BFC_VERSION_STRING="${PROJECT_VERSION}")
+
 target_link_libraries(bfc_cli bfc)
 
 # Link ZSTD if enabled (needed for static library dependencies)

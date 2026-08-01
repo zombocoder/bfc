@@ -53,8 +53,14 @@ void print_usage(const char* program_name) {
   printf("  %s extract myfiles.bfc --output /path/to/extract/\n", program_name);
 }
 
+// Supplied by the build from project(bfc VERSION ...) so that the CLI, bfc.pc
+// and the shared library SOVERSION cannot drift apart.
+#ifndef BFC_VERSION_STRING
+#define BFC_VERSION_STRING "unknown"
+#endif
+
 void print_version(void) {
-  printf("bfc version 1.0.0\n");
+  printf("bfc version %s\n", BFC_VERSION_STRING);
   printf("Binary File Container CLI tool\n");
   printf("Copyright 2021 zombocoder (Taras Havryliak)\n");
 }
