@@ -1363,7 +1363,186 @@ static int test_read_encrypted_uncompressed(void) {
 
   return 0;
 }
+
+// Collect the compression and encryption reported for one path by bfc_list.
+struct enc_probe {
+  const char* wanted;
+  int seen;
+  uint32_t comp;
+  uint32_t enc;
+};
+
+static int enc_probe_cb(const bfc_entry_t* entry, void* user) {
+  struct enc_probe* probe = (struct enc_probe*) user;
+  if (strcmp(entry->path, probe->wanted) == 0) {
+    probe->seen = 1;
+    probe->comp = entry->comp;
+    probe->enc = entry->enc;
+  }
+  return 0;
+}
+
+// Regression: bfc_list built its bfc_entry_t with a designated initializer that
+// omitted `enc`, so every listed entry silently reported BFC_ENC_NONE even in an
+// encrypted container. bfc_stat has always reported it, so the two disagreed.
+static int test_list_reports_encryption(void) {
+  const char* filename = "reader_test_list_enc.bfc";
+  const char* content = "listed and encrypted";
+
+  uint8_t key[32];
+  for (size_t i = 0; i < sizeof(key); i++) {
+    key[i] = (uint8_t) (i * 3 + 1);
+  }
+
+  unlink(filename);
+
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+  assert(bfc_set_encryption_key(writer, key) == BFC_OK);
+
+  FILE* temp = tmpfile();
+  assert(temp != NULL);
+  fwrite(content, 1, strlen(content), temp);
+  rewind(temp);
+  assert(bfc_add_file(writer, "secret.txt", temp, 0644, bfc_os_current_time_ns(), NULL) == BFC_OK);
+  fclose(temp);
+
+  assert(bfc_finish(writer) == BFC_OK);
+  bfc_close(writer);
+
+  bfc_t* reader = NULL;
+  assert(bfc_open(filename, &reader) == BFC_OK);
+
+  bfc_entry_t stated;
+  assert(bfc_stat(reader, "secret.txt", &stated) == BFC_OK);
+  assert(stated.enc != BFC_ENC_NONE);
+
+  struct enc_probe probe = {.wanted = "secret.txt", .seen = 0, .comp = 0, .enc = 0};
+  assert(bfc_list(reader, NULL, enc_probe_cb, &probe) == BFC_OK);
+  assert(probe.seen == 1);
+
+  // What bfc_list reports must agree with bfc_stat.
+  assert(probe.enc == stated.enc);
+  assert(probe.comp == stated.comp);
+  assert(probe.enc != BFC_ENC_NONE);
+
+  bfc_close_read(reader);
+  unlink(filename);
+
+  return 0;
+}
 #endif
+
+// Write a container holding one compressible file, optionally compressed and
+// optionally encrypted with `key`. Returns BFC_OK on success.
+static int make_verify_container(const char* filename, int compress, const uint8_t* key) {
+  unlink(filename);
+
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  if (result != BFC_OK) {
+    return result;
+  }
+
+  if (compress) {
+    result = bfc_set_compression(writer, BFC_COMP_ZSTD, 3);
+    if (result != BFC_OK) {
+      bfc_close(writer);
+      return result;
+    }
+    bfc_set_compression_threshold(writer, 16);
+  }
+  if (key) {
+    result = bfc_set_encryption_key(writer, key);
+    if (result != BFC_OK) {
+      bfc_close(writer);
+      return result;
+    }
+  }
+
+  FILE* temp = tmpfile();
+  if (!temp) {
+    bfc_close(writer);
+    return BFC_E_IO;
+  }
+  // Repetitive, so zstd actually shrinks it and the stored bytes differ from
+  // the original — which is the whole point of the test.
+  for (int i = 0; i < 400; i++) {
+    fputs("verify me verify me verify me\n", temp);
+  }
+  rewind(temp);
+
+  result = bfc_add_file(writer, "payload.txt", temp, 0644, bfc_os_current_time_ns(), NULL);
+  fclose(temp);
+  if (result != BFC_OK) {
+    bfc_close(writer);
+    return result;
+  }
+
+  result = bfc_finish(writer);
+  bfc_close(writer);
+  return result;
+}
+
+// Regression: bfc_verify(deep) checksummed the raw stored bytes against the
+// checksum of the original content. For anything compressed or encrypted the
+// two differ by definition, so it reported corruption on perfectly good
+// archives — including ones it had just written itself.
+static int test_verify_deep_transformed_content(void) {
+  const char* filename = "reader_test_verify_deep.bfc";
+
+  // Stored as-is: this path always worked, and must keep working.
+  assert(make_verify_container(filename, 0, NULL) == BFC_OK);
+  bfc_t* reader = NULL;
+  assert(bfc_open(filename, &reader) == BFC_OK);
+  assert(bfc_verify(reader, 0) == BFC_OK);
+  assert(bfc_verify(reader, 1) == BFC_OK);
+  bfc_close_read(reader);
+  unlink(filename);
+
+#ifdef BFC_WITH_ZSTD
+  // Compressed: the stored bytes are a zstd frame, so the checksum can only be
+  // recomputed after decompressing.
+  assert(make_verify_container(filename, 1, NULL) == BFC_OK);
+  reader = NULL;
+  assert(bfc_open(filename, &reader) == BFC_OK);
+
+  bfc_entry_t entry;
+  assert(bfc_stat(reader, "payload.txt", &entry) == BFC_OK);
+  assert(entry.comp == BFC_COMP_ZSTD);
+  assert(entry.obj_size < entry.size); // it really did shrink
+
+  assert(bfc_verify(reader, 1) == BFC_OK);
+  bfc_close_read(reader);
+  unlink(filename);
+#endif
+
+#ifdef BFC_WITH_SODIUM
+  // Encrypted, with the key supplied: same story, plus decryption.
+  uint8_t key[32];
+  for (size_t i = 0; i < sizeof(key); i++) {
+    key[i] = (uint8_t) (i + 7);
+  }
+
+  assert(make_verify_container(filename, 1, key) == BFC_OK);
+  reader = NULL;
+  assert(bfc_open(filename, &reader) == BFC_OK);
+  assert(bfc_reader_set_encryption_key(reader, key) == BFC_OK);
+  assert(bfc_verify(reader, 1) == BFC_OK);
+  bfc_close_read(reader);
+
+  // Without the key the content cannot be checked at all. Saying so is honest;
+  // claiming corruption is not.
+  reader = NULL;
+  assert(bfc_open(filename, &reader) == BFC_OK);
+  assert(bfc_verify(reader, 1) == BFC_E_PERM);
+  bfc_close_read(reader);
+  unlink(filename);
+#endif
+
+  return 0;
+}
 
 int test_reader(void) {
   if (test_open_container() != 0)
@@ -1419,7 +1598,11 @@ int test_reader(void) {
 #ifdef BFC_WITH_SODIUM
   if (test_read_encrypted_uncompressed() != 0)
     return 1;
+  if (test_list_reports_encryption() != 0)
+    return 1;
 #endif
+  if (test_verify_deep_transformed_content() != 0)
+    return 1;
 
   return 0;
 }

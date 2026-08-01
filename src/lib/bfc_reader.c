@@ -398,6 +398,7 @@ int bfc_list(bfc_t* r, const char* prefix_dir, bfc_list_cb cb, void* user) {
                          .mode = r->entries[i].mode,
                          .mtime_ns = r->entries[i].mtime_ns,
                          .comp = r->entries[i].comp,
+                         .enc = r->entries[i].enc,
                          .size = r->entries[i].orig_size,
                          .crc32c = r->entries[i].crc32c,
                          .obj_offset = r->entries[i].obj_offset,
@@ -939,7 +940,41 @@ int bfc_verify(bfc_t* r, int deep) {
     if (deep) {
       // Deep verification - read and verify CRC of each file
       if ((entry->mode & S_IFMT) == S_IFREG) {
-        // Verify file content CRC
+        // entry->crc32c covers the *original* content. When the object was
+        // compressed or encrypted the stored bytes are something else, so the
+        // checksum can only be recomputed after undoing those transforms.
+        // bfc_read already performs exactly that pipeline.
+        if (entry->comp != BFC_COMP_NONE || entry->enc != BFC_ENC_NONE) {
+          if (entry->enc != BFC_ENC_NONE && !r->has_encryption_key) {
+            // Encrypted content cannot be checked without a key. Saying so is
+            // honest; reporting corruption would not be.
+            return BFC_E_PERM;
+          }
+
+          if (entry->orig_size > 0) {
+            uint8_t* plaintext = bfc_malloc((size_t) entry->orig_size);
+            if (!plaintext) {
+              return BFC_E_IO;
+            }
+
+            size_t got = bfc_read(r, entry->path, 0, plaintext, (size_t) entry->orig_size);
+            if (got != entry->orig_size) {
+              bfc_free(plaintext);
+              return BFC_E_CRC;
+            }
+
+            uint32_t plain_crc = bfc_crc32c_compute(plaintext, got);
+            bfc_free(plaintext);
+
+            if (plain_crc != entry->crc32c) {
+              return BFC_E_CRC;
+            }
+          }
+          continue;
+        }
+
+        // Stored as-is: stream it, so a large file is not materialised in
+        // memory just to be checksummed.
         if (bfc_os_seek(r->file, (int64_t) entry->obj_offset, SEEK_SET) != BFC_OK) {
           return BFC_E_IO;
         }
