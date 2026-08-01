@@ -1363,6 +1363,75 @@ static int test_read_encrypted_uncompressed(void) {
 
   return 0;
 }
+
+// Collect the compression and encryption reported for one path by bfc_list.
+struct enc_probe {
+  const char* wanted;
+  int seen;
+  uint32_t comp;
+  uint32_t enc;
+};
+
+static int enc_probe_cb(const bfc_entry_t* entry, void* user) {
+  struct enc_probe* probe = (struct enc_probe*) user;
+  if (strcmp(entry->path, probe->wanted) == 0) {
+    probe->seen = 1;
+    probe->comp = entry->comp;
+    probe->enc = entry->enc;
+  }
+  return 0;
+}
+
+// Regression: bfc_list built its bfc_entry_t with a designated initializer that
+// omitted `enc`, so every listed entry silently reported BFC_ENC_NONE even in an
+// encrypted container. bfc_stat has always reported it, so the two disagreed.
+static int test_list_reports_encryption(void) {
+  const char* filename = "reader_test_list_enc.bfc";
+  const char* content = "listed and encrypted";
+
+  uint8_t key[32];
+  for (size_t i = 0; i < sizeof(key); i++) {
+    key[i] = (uint8_t) (i * 3 + 1);
+  }
+
+  unlink(filename);
+
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+  assert(bfc_set_encryption_key(writer, key) == BFC_OK);
+
+  FILE* temp = tmpfile();
+  assert(temp != NULL);
+  fwrite(content, 1, strlen(content), temp);
+  rewind(temp);
+  assert(bfc_add_file(writer, "secret.txt", temp, 0644, bfc_os_current_time_ns(), NULL) == BFC_OK);
+  fclose(temp);
+
+  assert(bfc_finish(writer) == BFC_OK);
+  bfc_close(writer);
+
+  bfc_t* reader = NULL;
+  assert(bfc_open(filename, &reader) == BFC_OK);
+
+  bfc_entry_t stated;
+  assert(bfc_stat(reader, "secret.txt", &stated) == BFC_OK);
+  assert(stated.enc != BFC_ENC_NONE);
+
+  struct enc_probe probe = {.wanted = "secret.txt", .seen = 0, .comp = 0, .enc = 0};
+  assert(bfc_list(reader, NULL, enc_probe_cb, &probe) == BFC_OK);
+  assert(probe.seen == 1);
+
+  // What bfc_list reports must agree with bfc_stat.
+  assert(probe.enc == stated.enc);
+  assert(probe.comp == stated.comp);
+  assert(probe.enc != BFC_ENC_NONE);
+
+  bfc_close_read(reader);
+  unlink(filename);
+
+  return 0;
+}
 #endif
 
 int test_reader(void) {
@@ -1418,6 +1487,8 @@ int test_reader(void) {
     return 1;
 #ifdef BFC_WITH_SODIUM
   if (test_read_encrypted_uncompressed() != 0)
+    return 1;
+  if (test_list_reports_encryption() != 0)
     return 1;
 #endif
 

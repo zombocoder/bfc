@@ -398,6 +398,7 @@ int bfc_list(bfc_t* r, const char* prefix_dir, bfc_list_cb cb, void* user) {
                          .mode = r->entries[i].mode,
                          .mtime_ns = r->entries[i].mtime_ns,
                          .comp = r->entries[i].comp,
+                         .enc = r->entries[i].enc,
                          .size = r->entries[i].orig_size,
                          .crc32c = r->entries[i].crc32c,
                          .obj_offset = r->entries[i].obj_offset,
