@@ -1268,6 +1268,103 @@ static int test_symlink_partial_read(void) {
   return 0;
 }
 
+#ifdef BFC_WITH_SODIUM
+// Regression: bfc_read used to skip decryption for encrypted-but-uncompressed
+// objects, handing raw ciphertext back to the caller. A wrong key went
+// unnoticed too, because the AEAD tag was never verified.
+static int test_read_encrypted_uncompressed(void) {
+  const char* filename = "reader_test_encrypted_plain.bfc";
+  const char* content = "encrypted but not compressed payload";
+  const size_t content_len = strlen(content);
+
+  // Raw keys rather than passwords: this exercises the same decryption path in
+  // bfc_read, but skips Argon2id, which takes minutes in a sanitised -O0 build.
+  uint8_t key[32];
+  uint8_t wrong_key[32];
+  for (size_t i = 0; i < sizeof(key); i++) {
+    key[i] = (uint8_t) (i + 1);
+    wrong_key[i] = (uint8_t) (0xFF - i);
+  }
+
+  unlink(filename);
+
+  bfc_t* writer = NULL;
+  int result = bfc_create(filename, 4096, 0, &writer);
+  assert(result == BFC_OK);
+
+  result = bfc_set_encryption_key(writer, key);
+  assert(result == BFC_OK);
+
+  // Compression stays off, so this exercises the uncompressed read path.
+  assert(bfc_get_compression(writer) == BFC_COMP_NONE);
+
+  FILE* temp = tmpfile();
+  assert(temp != NULL);
+  fwrite(content, 1, content_len, temp);
+  rewind(temp);
+
+  result = bfc_add_file(writer, "secret.txt", temp, 0644, bfc_os_current_time_ns(), NULL);
+  assert(result == BFC_OK);
+  fclose(temp);
+
+  result = bfc_finish(writer);
+  assert(result == BFC_OK);
+  bfc_close(writer);
+
+  char buffer[256];
+
+  // Without a key, nothing may be returned.
+  bfc_t* reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+  assert(bfc_has_encryption(reader) == 1);
+
+  size_t bytes_read = bfc_read(reader, "secret.txt", 0, buffer, sizeof(buffer));
+  assert(bytes_read == 0);
+  bfc_close_read(reader);
+
+  // With the wrong key the AEAD tag must fail, not silently succeed.
+  reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+  result = bfc_reader_set_encryption_key(reader, wrong_key);
+  assert(result == BFC_OK);
+
+  bytes_read = bfc_read(reader, "secret.txt", 0, buffer, sizeof(buffer));
+  assert(bytes_read == 0);
+  bfc_close_read(reader);
+
+  // With the right key the plaintext comes back verbatim.
+  reader = NULL;
+  result = bfc_open(filename, &reader);
+  assert(result == BFC_OK);
+  result = bfc_reader_set_encryption_key(reader, key);
+  assert(result == BFC_OK);
+
+  memset(buffer, 0, sizeof(buffer));
+  bytes_read = bfc_read(reader, "secret.txt", 0, buffer, sizeof(buffer));
+  assert(bytes_read == content_len);
+  buffer[bytes_read] = '\0';
+  assert(strcmp(buffer, content) == 0);
+
+  // Partial reads must slice the decrypted plaintext, not the ciphertext.
+  memset(buffer, 0, sizeof(buffer));
+  bytes_read = bfc_read(reader, "secret.txt", 10, buffer, 6);
+  assert(bytes_read == 6);
+  buffer[bytes_read] = '\0';
+  assert(memcmp(buffer, content + 10, 6) == 0);
+
+  // Reading past the end yields nothing.
+  bytes_read = bfc_read(reader, "secret.txt", content_len, buffer, sizeof(buffer));
+  assert(bytes_read == 0);
+
+  bfc_close_read(reader);
+  unlink(filename);
+
+  return 0;
+}
+#endif
+
 int test_reader(void) {
   if (test_open_container() != 0)
     return 1;
@@ -1319,6 +1416,10 @@ int test_reader(void) {
     return 1;
   if (test_symlink_partial_read() != 0)
     return 1;
+#ifdef BFC_WITH_SODIUM
+  if (test_read_encrypted_uncompressed() != 0)
+    return 1;
+#endif
 
   return 0;
 }
