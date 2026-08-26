@@ -23,6 +23,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 option(BFC_WITH_FUSE "Build with FUSE support for mounting" OFF)
 option(BFC_WITH_ZSTD "Build with Zstd compression support" OFF)
 option(BFC_WITH_SODIUM "Build with libsodium encryption support" OFF)
+option(BFC_WITH_OCI "Build with OCI Image Specs support" OFF)
 option(BFC_COVERAGE "Enable coverage reporting" OFF)
 option(BFC_BUILD_BENCHMARKS "Build benchmarks" ON)
 option(BFC_BUILD_EXAMPLES "Build examples" ON)
@@ -102,6 +103,15 @@ if(BFC_WITH_SODIUM)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(SODIUM REQUIRED libsodium)
     message(STATUS "libsodium encryption support enabled")
+endif()
+
+if(BFC_WITH_OCI)
+    find_package(PkgConfig REQUIRED)
+    # IMPORTED_TARGET carries include dirs, libraries AND link directories in one
+    # go, so every consumer (lib, cli, tests, benchmarks, examples) links cleanly
+    # even where libcjson lives off the default linker path (Homebrew, /usr/local).
+    pkg_check_modules(CJSON REQUIRED IMPORTED_TARGET libcjson)
+    message(STATUS "OCI image-specs support enabled")
 endif()
 
 # Include directories

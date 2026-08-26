@@ -238,7 +238,7 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
     return -1;
   }
 
-// Set file permissions and timestamps using file descriptor to avoid TOCTOU race conditions
+  // Set file permissions and timestamps using file descriptor to avoid TOCTOU race conditions
 #ifndef _WIN32
   if (fchmod(fd, entry->mode & 0777) != 0) {
     print_verbose("Warning: cannot set permissions on '%s': %s", output_path, strerror(errno));

@@ -58,6 +58,8 @@ const char* bfc_error_string(int error_code) {
     return "Not found";
   case BFC_E_PERM:
     return "Permission denied";
+  case BFC_E_NOSYS:
+    return "Operation not implemented";
   default:
     return "Unknown error";
   }

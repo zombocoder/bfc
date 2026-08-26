@@ -32,6 +32,7 @@ typedef enum {
   BFC_E_EXISTS = -5,
   BFC_E_NOTFOUND = -6,
   BFC_E_PERM = -7,
+  BFC_E_NOSYS = -8, /* operation not implemented */
 } bfc_err_t;
 
 // Compression types

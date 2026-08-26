@@ -49,6 +49,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install clang-format zstd libsodium ninja || true
+          # cmake is already available on macOS runners
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -66,6 +67,8 @@ jobs:
           fi
           cmake -B build \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
             -DBFC_WITH_ZSTD=ON \
             -DBFC_WITH_SODIUM=ON \
             $TOOLCHAIN_ARG
