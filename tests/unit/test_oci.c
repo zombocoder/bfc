@@ -33,6 +33,32 @@
 // the library functions).
 #include <bfc_oci.h>
 
+// Unique per-process paths so the suite is safe under parallel ctest.
+static void oci_tmp_path(char* buf, size_t n, const char* name) {
+  snprintf(buf, n, "/tmp/bfc_oci_%d_%s.bfc", (int) getpid(), name);
+}
+
+// Create a real, finished container so the "NULL argument" assertions below
+// actually execute (they used to hide behind bfc_open() on a file that was
+// never created, so the second half of each test silently never ran).
+static int oci_make_container(const char* path) {
+  bfc_t* w = NULL;
+  if (bfc_create(path, 4096, 0, &w) != BFC_OK) {
+    return -1;
+  }
+  bfc_oci_manifest_t m = {0};
+  m.schema_version = strdup(BFC_OCI_SCHEMA_VERSION);
+  m.media_type = strdup(BFC_OCI_MEDIA_TYPE_MANIFEST);
+  int rc = bfc_create_from_oci_manifest(w, &m, "{\"architecture\":\"amd64\",\"os\":\"linux\"}");
+  bfc_free_oci_manifest(&m);
+  if (rc != BFC_OK || bfc_finish(w) != BFC_OK) {
+    bfc_close(w);
+    return -1;
+  }
+  bfc_close(w);
+  return 0;
+}
+
 static int test_validate_oci_manifest_null(void) {
   // Test with NULL manifest
   int result = bfc_validate_oci_manifest(NULL);
@@ -142,7 +168,8 @@ static int test_create_from_oci_manifest_null_args(void) {
   assert(result == BFC_E_INVAL);
 
   // Test with NULL manifest
-  const char* filename = "/tmp/test_oci_null.bfc";
+  char filename[256];
+  oci_tmp_path(filename, sizeof(filename), "null");
   bfc_t* writer = NULL;
   result = bfc_create(filename, 4096, 0, &writer);
   if (result == BFC_OK && writer != NULL) {
@@ -156,7 +183,8 @@ static int test_create_from_oci_manifest_null_args(void) {
 }
 
 static int test_create_from_oci_manifest_basic(void) {
-  const char* filename = "/tmp/test_oci_manifest.bfc";
+  char filename[256];
+  oci_tmp_path(filename, sizeof(filename), "manifest");
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -196,7 +224,8 @@ static int test_create_from_oci_index_null_args(void) {
   assert(result == BFC_E_INVAL);
 
   // Test with NULL index
-  const char* filename = "/tmp/test_oci_index.bfc";
+  char filename[256];
+  oci_tmp_path(filename, sizeof(filename), "index");
   bfc_t* writer = NULL;
   result = bfc_create(filename, 4096, 0, &writer);
   if (result == BFC_OK && writer != NULL) {
@@ -210,7 +239,8 @@ static int test_create_from_oci_index_null_args(void) {
 }
 
 static int test_create_from_oci_index_basic(void) {
-  const char* filename = "/tmp/test_oci_index.bfc";
+  char filename[256];
+  oci_tmp_path(filename, sizeof(filename), "index");
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -242,6 +272,9 @@ static int test_create_from_oci_index_basic(void) {
 }
 
 static int test_get_oci_manifest_null_args(void) {
+  char filename[256];
+  oci_tmp_path(filename, sizeof(filename), "get_manifest");
+  assert(oci_make_container(filename) == 0);
   bfc_oci_manifest_t manifest;
 
   // Test with NULL bfc
@@ -249,19 +282,21 @@ static int test_get_oci_manifest_null_args(void) {
   assert(result == BFC_E_INVAL);
 
   // Test with NULL manifest
-  const char* filename = "/tmp/test_get_manifest.bfc";
   bfc_t* reader = NULL;
   result = bfc_open(filename, &reader);
-  if (result == BFC_OK && reader != NULL) {
-    result = bfc_get_oci_manifest(reader, NULL);
-    assert(result == BFC_E_INVAL);
-    bfc_close_read(reader);
-  }
+  assert(result == BFC_OK && reader != NULL);
+  result = bfc_get_oci_manifest(reader, NULL);
+  assert(result == BFC_E_INVAL);
+  bfc_close_read(reader);
+  unlink(filename);
 
   return 0;
 }
 
 static int test_get_oci_config_null_args(void) {
+  char filename[256];
+  oci_tmp_path(filename, sizeof(filename), "get_config");
+  assert(oci_make_container(filename) == 0);
   bfc_oci_config_t config;
 
   // Test with NULL bfc
@@ -269,19 +304,21 @@ static int test_get_oci_config_null_args(void) {
   assert(result == BFC_E_INVAL);
 
   // Test with NULL config
-  const char* filename = "/tmp/test_get_config.bfc";
   bfc_t* reader = NULL;
   result = bfc_open(filename, &reader);
-  if (result == BFC_OK && reader != NULL) {
-    result = bfc_get_oci_config(reader, NULL);
-    assert(result == BFC_E_INVAL);
-    bfc_close_read(reader);
-  }
+  assert(result == BFC_OK && reader != NULL);
+  result = bfc_get_oci_config(reader, NULL);
+  assert(result == BFC_E_INVAL);
+  bfc_close_read(reader);
+  unlink(filename);
 
   return 0;
 }
 
 static int test_list_oci_layers_null_args(void) {
+  char filename[256];
+  oci_tmp_path(filename, sizeof(filename), "list_layers");
+  assert(oci_make_container(filename) == 0);
   bfc_oci_layer_t* layers = NULL;
   size_t layer_count = 0;
 
@@ -290,32 +327,33 @@ static int test_list_oci_layers_null_args(void) {
   assert(result == BFC_E_INVAL);
 
   // Test with NULL layers
-  const char* filename = "/tmp/test_list_layers.bfc";
   bfc_t* reader = NULL;
   result = bfc_open(filename, &reader);
-  if (result == BFC_OK && reader != NULL) {
-    result = bfc_list_oci_layers(reader, NULL, &layer_count);
-    assert(result == BFC_E_INVAL);
-    bfc_close_read(reader);
-  }
+  assert(result == BFC_OK && reader != NULL);
+  result = bfc_list_oci_layers(reader, NULL, &layer_count);
+  assert(result == BFC_E_INVAL);
+  bfc_close_read(reader);
+  unlink(filename);
 
   return 0;
 }
 
 static int test_extract_to_oci_null_args(void) {
+  char filename[256];
+  oci_tmp_path(filename, sizeof(filename), "extract");
+  assert(oci_make_container(filename) == 0);
   // Test with NULL bfc
   int result = bfc_extract_to_oci(NULL, "/tmp/test_output");
   assert(result == BFC_E_INVAL);
 
   // Test with NULL output_dir
-  const char* filename = "/tmp/test_extract.bfc";
   bfc_t* reader = NULL;
   result = bfc_open(filename, &reader);
-  if (result == BFC_OK && reader != NULL) {
-    result = bfc_extract_to_oci(reader, NULL);
-    assert(result == BFC_E_INVAL);
-    bfc_close_read(reader);
-  }
+  assert(result == BFC_OK && reader != NULL);
+  result = bfc_extract_to_oci(reader, NULL);
+  assert(result == BFC_E_INVAL);
+  bfc_close_read(reader);
+  unlink(filename);
 
   return 0;
 }
@@ -333,7 +371,8 @@ static int test_free_functions_null(void) {
 
 // Round-trip: write a manifest (+config) then read it back and verify fields.
 static int test_oci_manifest_roundtrip(void) {
-  const char* filename = "/tmp/test_oci_roundtrip.bfc";
+  char filename[256];
+  oci_tmp_path(filename, sizeof(filename), "roundtrip");
   unlink(filename);
 
   bfc_t* writer = NULL;
@@ -345,12 +384,15 @@ static int test_oci_manifest_roundtrip(void) {
   bfc_oci_manifest_t in = {0};
   in.schema_version = strdup(BFC_OCI_SCHEMA_VERSION);
   in.media_type = strdup(BFC_OCI_MEDIA_TYPE_MANIFEST);
-  in.config_digest = strdup("sha256:1111111111111111111111111111111111111111111111111111111111111111");
+  in.config_digest =
+      strdup("sha256:1111111111111111111111111111111111111111111111111111111111111111");
   in.config_size = 512;
   in.layer_count = 2;
   in.layer_digests = calloc(2, sizeof(char*));
-  in.layer_digests[0] = strdup("sha256:2222222222222222222222222222222222222222222222222222222222222222");
-  in.layer_digests[1] = strdup("sha256:3333333333333333333333333333333333333333333333333333333333333333");
+  in.layer_digests[0] =
+      strdup("sha256:2222222222222222222222222222222222222222222222222222222222222222");
+  in.layer_digests[1] =
+      strdup("sha256:3333333333333333333333333333333333333333333333333333333333333333");
 
   const char* config_json = "{\"architecture\":\"amd64\",\"os\":\"linux\"}";
   result = bfc_create_from_oci_manifest(writer, &in, config_json);
@@ -390,11 +432,7 @@ static int test_oci_manifest_roundtrip(void) {
   assert(layer_count == 2);
   assert(layers[0].digest && strcmp(layers[0].digest, in.layer_digests[0]) == 0);
   assert(layers[1].digest && strcmp(layers[1].digest, in.layer_digests[1]) == 0);
-  for (size_t i = 0; i < layer_count; i++) {
-    free(layers[i].digest);
-    free(layers[i].media_type);
-  }
-  free(layers);
+  bfc_free_oci_layers(layers, layer_count);
 
   // Config round-trips.
   bfc_oci_config_t cfg = {0};
@@ -416,6 +454,72 @@ static int test_oci_manifest_roundtrip(void) {
   free(in.layer_digests[0]);
   free(in.layer_digests[1]);
   free(in.layer_digests);
+  unlink(filename);
+  return 0;
+}
+
+// Write a layer, extract the container to an OCI directory, and confirm the blob
+// actually lands on disk. This is the case the prefix mismatch silently broke:
+// the writer stored blobs/sha256/<hex> while the extractor listed "layers/", so
+// extraction reported success having found nothing.
+static int test_oci_layer_extract_roundtrip(void) {
+  char filename[256];
+  oci_tmp_path(filename, sizeof(filename), "layer_rt");
+  unlink(filename);
+
+  const char* digest = "sha256:4444444444444444444444444444444444444444444444444444444444444444";
+  const char* payload = "layer-bytes";
+
+  bfc_t* writer = NULL;
+  if (bfc_create(filename, 4096, 0, &writer) != BFC_OK) {
+    return 0; // skip if the fs won't cooperate
+  }
+
+  bfc_oci_manifest_t m = {0};
+  m.schema_version = strdup(BFC_OCI_SCHEMA_VERSION);
+  m.media_type = strdup(BFC_OCI_MEDIA_TYPE_MANIFEST);
+  assert(bfc_create_from_oci_manifest(writer, &m,
+                                      "{\"architecture\":\"amd64\",\"os\":\"linux\"}") == BFC_OK);
+  bfc_free_oci_manifest(&m);
+
+  bfc_oci_layer_t layer = {0};
+  layer.digest = strdup(digest);
+  layer.media_type = strdup("application/vnd.oci.image.layer.v1.tar+gzip");
+  layer.size = strlen(payload);
+
+  FILE* data = tmpfile();
+  assert(data != NULL);
+  fwrite(payload, 1, strlen(payload), data);
+  rewind(data);
+  assert(bfc_add_oci_layer(writer, &layer, data) == BFC_OK);
+  fclose(data);
+  bfc_free_oci_layer(&layer);
+
+  assert(bfc_finish(writer) == BFC_OK);
+  bfc_close(writer);
+
+  // Extract and verify the blob is really there, named by its hex (no doubled
+  // "sha256:" in the path).
+  char outdir[256];
+  snprintf(outdir, sizeof(outdir), "/tmp/bfc_oci_%d_extract", (int) getpid());
+  mkdir(outdir, 0755);
+
+  bfc_t* reader = NULL;
+  assert(bfc_open(filename, &reader) == BFC_OK);
+  assert(bfc_extract_to_oci(reader, outdir) == BFC_OK);
+  bfc_close_read(reader);
+
+  char blob[512];
+  snprintf(blob, sizeof(blob), "%s/oci/blobs/sha256/%s", outdir, strchr(digest, ':') + 1);
+  FILE* f = fopen(blob, "rb");
+  assert(f != NULL); // the whole point: extraction produced the layer
+  char got[64] = {0};
+  size_t n = fread(got, 1, sizeof(got) - 1, f);
+  fclose(f);
+  assert(n == strlen(payload));
+  assert(strcmp(got, payload) == 0);
+
+  unlink(blob);
   unlink(filename);
   return 0;
 }
@@ -446,6 +550,7 @@ int test_oci(void) {
   test_extract_to_oci_null_args();
 
   test_oci_manifest_roundtrip();
+  test_oci_layer_extract_roundtrip();
 
   test_free_functions_null();
 

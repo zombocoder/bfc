@@ -33,6 +33,29 @@ cmake -B build -DBFC_WITH_OCI=ON
 cmake --build build
 ```
 
+### Memory ownership
+
+The **caller owns the struct; the library owns the fields.** The `bfc_free_oci_*`
+helpers release the fields and zero the struct — they never `free()` the struct
+itself, so they are safe on stack locals:
+
+```c
+bfc_oci_manifest_t m = {0};
+bfc_get_oci_manifest(bfc, &m);   /* fills m, allocates its fields */
+bfc_free_oci_manifest(&m);       /* frees the fields only */
+```
+
+If you allocated the struct yourself, free it yourself after the helper returns.
+`bfc_list_oci_layers()` is the exception that allocates a block: it returns one
+contiguous array, released with `bfc_free_oci_layers(layers, count)`.
+
+### Platform support
+
+OCI support is **POSIX-only** for now: the implementation uses `fmemopen`,
+two-argument `mkdir`, `<unistd.h>` and `<libgen.h>`, none of which exist under
+MSVC. Linux, macOS and FreeBSD are supported; `-DBFC_WITH_OCI=ON` is not
+expected to build on Windows/MSVC yet.
+
 The write path serializes manifests/indexes to JSON; the read path
 (`bfc_get_oci_manifest`/`bfc_get_oci_config`/`bfc_list_oci_layers`) parses them
 back with libcjson.
@@ -80,7 +103,7 @@ void bfc_free_oci_manifest(bfc_oci_manifest_t* manifest);
 void bfc_free_oci_config(bfc_oci_config_t* config);
 void bfc_free_oci_layer(bfc_oci_layer_t* layer);
 void bfc_free_oci_index(bfc_oci_index_t* index);
-void bfc_free_oci_layers(bfc_oci_layer_t** layers, size_t layer_count);
+void bfc_free_oci_layers(bfc_oci_layer_t* layers, size_t layer_count);
 ```
 
 ## Data Structures
@@ -89,7 +112,7 @@ void bfc_free_oci_layers(bfc_oci_layer_t** layers, size_t layer_count);
 
 ```c
 typedef struct {
-    char* schema_version;        // OCI schema version (e.g., "2.0.1")
+    char* schema_version;        // OCI schema version — always "2" per the image-spec
     char* media_type;            // Media type (e.g., "application/vnd.oci.image.manifest.v1+json")
     char* config_digest;         // SHA256 digest of config
     size_t config_size;          // Size of config in bytes
@@ -138,7 +161,7 @@ int main() {
     
     // Create OCI manifest
     bfc_oci_manifest_t* manifest = calloc(1, sizeof(bfc_oci_manifest_t));
-    manifest->schema_version = strdup("2.0.1");
+    manifest->schema_version = strdup("2");
     manifest->media_type = strdup("application/vnd.oci.image.manifest.v1+json");
     manifest->config_digest = strdup("sha256:abc123...");
     manifest->config_size = 1024;
@@ -163,9 +186,12 @@ int main() {
     bfc_finish(bfc);
     bfc_close(bfc);
     
-    // Cleanup
+    // Cleanup: the helpers release the FIELDS; these structs were malloc'd
+    // by us, so we release them ourselves.
     bfc_free_oci_manifest(manifest);
+    free(manifest);
     bfc_free_oci_layer(layer);
+    free(layer);
     
     return 0;
 }
@@ -173,10 +199,11 @@ int main() {
 
 ## Building with OCI Support
 
-To build BFC with OCI support, include the OCI source file:
+OCI support is built through CMake (see **Building** above) — the module lives at
+`src/lib/bfc_oci.c` and is compiled only when `BFC_WITH_OCI=ON`:
 
 ```bash
-gcc -o bfc_oci_example examples/oci_example.c src/bfc_oci.c src/bfc.c -Iinclude
+cmake -B build -DBFC_WITH_OCI=ON && cmake --build build
 ```
 
 ## Integration with Container Runtimes

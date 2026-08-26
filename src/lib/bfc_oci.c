@@ -29,6 +29,30 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+// Single source of truth for where layer blobs live inside the container. The
+// writer and the extractor MUST agree on this prefix — they previously did not
+// (writer used blobs/sha256/, extractor listed layers/), so extraction silently
+// found nothing.
+#define BFC_OCI_BLOB_PREFIX "blobs/sha256/"
+
+// Build the container path for a layer digest.
+// An OCI digest is "<algorithm>:<hex>"; the algorithm already appears in the
+// blob directory, so it is stripped to avoid blobs/sha256/sha256:<hex>.
+static int oci_layer_path(const char* digest, char* buf, size_t buflen) {
+  if (!digest || !*digest) {
+    return BFC_E_INVAL;
+  }
+  const char* hex = strchr(digest, ':');
+  hex = hex ? hex + 1 : digest;
+  if (!*hex) {
+    return BFC_E_INVAL;
+  }
+  if (snprintf(buf, buflen, BFC_OCI_BLOB_PREFIX "%s", hex) >= (int) buflen) {
+    return BFC_E_INVAL;
+  }
+  return BFC_OK;
+}
+
 // Read an entire container entry into a NUL-terminated heap buffer.
 static int oci_read_entry(bfc_t* bfc, const char* path, char** out, size_t* out_len) {
   bfc_entry_t e;
@@ -122,32 +146,40 @@ int bfc_create_from_oci_manifest(bfc_t* bfc, const bfc_oci_manifest_t* manifest,
     return BFC_E_INVAL;
   }
 
-  // Serialize the manifest to JSON (bfc_add_file requires a real source stream;
-  // a NULL source is rejected, so we must materialize manifest.json contents).
-  char* json = NULL;
-  size_t json_len = 0;
-  FILE* ms = open_memstream(&json, &json_len);
-  if (!ms) {
+  // Build manifest.json with cJSON so every string is escaped correctly and
+  // schemaVersion lands in a real JSON number slot (a raw "%s" of "2.0.1" would
+  // emit {"schemaVersion":2.0.1}, which is not parseable).
+  cJSON* root = cJSON_CreateObject();
+  if (!root) {
     return BFC_E_IO;
   }
-  // schemaVersion is the integer 2 per the OCI image-spec; schema_version holds "2".
-  fprintf(ms, "{\"schemaVersion\":%s,\"mediaType\":\"%s\"",
-          manifest->schema_version ? manifest->schema_version : "2",
-          manifest->media_type ? manifest->media_type : "");
+  cJSON_AddNumberToObject(root, "schemaVersion",
+                          manifest->schema_version ? atoi(manifest->schema_version) : 2);
+  cJSON_AddStringToObject(root, "mediaType", manifest->media_type ? manifest->media_type : "");
   if (manifest->config_digest) {
-    fprintf(ms, ",\"config\":{\"digest\":\"%s\",\"size\":%zu}", manifest->config_digest,
-            manifest->config_size);
+    cJSON* cfg = cJSON_AddObjectToObject(root, "config");
+    if (cfg) {
+      cJSON_AddStringToObject(cfg, "digest", manifest->config_digest);
+      cJSON_AddNumberToObject(cfg, "size", (double) manifest->config_size);
+    }
   }
-  fprintf(ms, ",\"layers\":[");
-  for (size_t i = 0; i < manifest->layer_count; i++) {
-    fprintf(ms, "%s{\"digest\":\"%s\"}", i ? "," : "",
-            (manifest->layer_digests && manifest->layer_digests[i]) ? manifest->layer_digests[i] : "");
+  cJSON* layers = cJSON_AddArrayToObject(root, "layers");
+  for (size_t i = 0; layers && i < manifest->layer_count; i++) {
+    cJSON* l = cJSON_CreateObject();
+    if (!l) {
+      continue;
+    }
+    cJSON_AddStringToObject(
+        l, "digest",
+        (manifest->layer_digests && manifest->layer_digests[i]) ? manifest->layer_digests[i] : "");
+    cJSON_AddItemToArray(layers, l);
   }
-  fprintf(ms, "]}");
-  if (fclose(ms) != 0 || !json) {
-    free(json);
+  char* json = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  if (!json) {
     return BFC_E_IO;
   }
+  size_t json_len = strlen(json);
 
   // Add manifest.json to BFC
   FILE* manifest_file = fmemopen(json, json_len, "r");
@@ -186,27 +218,31 @@ int bfc_create_from_oci_index(bfc_t* bfc, const bfc_oci_index_t* index) {
     return BFC_E_INVAL;
   }
 
-  // Serialize the index to JSON (bfc_add_file rejects a NULL source).
-  char* json = NULL;
-  size_t json_len = 0;
-  FILE* ms = open_memstream(&json, &json_len);
-  if (!ms) {
+  // Build index.json with cJSON (same escaping/number-slot reasoning as above).
+  cJSON* root = cJSON_CreateObject();
+  if (!root) {
     return BFC_E_IO;
   }
-  fprintf(ms, "{\"schemaVersion\":%s,\"mediaType\":\"%s\",\"manifests\":[",
-          index->schema_version ? index->schema_version : "2",
-          index->media_type ? index->media_type : "");
-  for (size_t i = 0; i < index->manifest_count; i++) {
+  cJSON_AddNumberToObject(root, "schemaVersion",
+                          index->schema_version ? atoi(index->schema_version) : 2);
+  cJSON_AddStringToObject(root, "mediaType", index->media_type ? index->media_type : "");
+  cJSON* arr = cJSON_AddArrayToObject(root, "manifests");
+  for (size_t i = 0; arr && i < index->manifest_count; i++) {
     const bfc_oci_manifest_t* m = index->manifests ? index->manifests[i] : NULL;
-    fprintf(ms, "%s{\"mediaType\":\"%s\",\"digest\":\"%s\"}", i ? "," : "",
-            (m && m->media_type) ? m->media_type : "",
-            (m && m->config_digest) ? m->config_digest : "");
+    cJSON* item = cJSON_CreateObject();
+    if (!item) {
+      continue;
+    }
+    cJSON_AddStringToObject(item, "mediaType", (m && m->media_type) ? m->media_type : "");
+    cJSON_AddStringToObject(item, "digest", (m && m->config_digest) ? m->config_digest : "");
+    cJSON_AddItemToArray(arr, item);
   }
-  fprintf(ms, "]}");
-  if (fclose(ms) != 0 || !json) {
-    free(json);
+  char* json = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  if (!json) {
     return BFC_E_IO;
   }
+  size_t json_len = strlen(json);
 
   // Add index.json to BFC
   FILE* index_file = fmemopen(json, json_len, "r");
@@ -226,13 +262,13 @@ int bfc_create_from_oci_index(bfc_t* bfc, const bfc_oci_index_t* index) {
 
 // Add OCI layer to BFC container
 int bfc_add_oci_layer(bfc_t* bfc, const bfc_oci_layer_t* layer, FILE* layer_data) {
-  if (!bfc || !layer || !layer_data) {
+  if (!bfc || !layer || !layer_data || !layer->digest) {
     return BFC_E_INVAL;
   }
 
   // Create layer path from digest (refuse over-long digests rather than silently truncating)
   char layer_path[256];
-  if (snprintf(layer_path, sizeof(layer_path), "blobs/sha256/%s", layer->digest) >= (int) sizeof(layer_path)) {
+  if (oci_layer_path(layer->digest, layer_path, sizeof(layer_path)) != BFC_OK) {
     return BFC_E_INVAL;
   }
 
@@ -272,7 +308,8 @@ int bfc_extract_to_oci(bfc_t* bfc, const char* output_dir) {
 
   // Create sha256 subdirectory
   char sha256_dir[1024];
-  if (snprintf(sha256_dir, sizeof(sha256_dir), "%s/sha256", blobs_dir) >= (int) sizeof(sha256_dir)) {
+  if (snprintf(sha256_dir, sizeof(sha256_dir), "%s/sha256", blobs_dir) >=
+      (int) sizeof(sha256_dir)) {
     return BFC_E_INVAL;
   }
 
@@ -282,7 +319,8 @@ int bfc_extract_to_oci(bfc_t* bfc, const char* output_dir) {
 
   // Extract OCI manifest
   char manifest_path[1024];
-  if (snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", oci_dir) >= (int) sizeof(manifest_path)) {
+  if (snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", oci_dir) >=
+      (int) sizeof(manifest_path)) {
     return BFC_E_INVAL;
   }
 
@@ -300,7 +338,8 @@ int bfc_extract_to_oci(bfc_t* bfc, const char* output_dir) {
 
   // Extract OCI config
   char config_path[1024];
-  if (snprintf(config_path, sizeof(config_path), "%s/config.json", oci_dir) >= (int) sizeof(config_path)) {
+  if (snprintf(config_path, sizeof(config_path), "%s/config.json", oci_dir) >=
+      (int) sizeof(config_path)) {
     return BFC_E_INVAL;
   }
 
@@ -316,41 +355,30 @@ int bfc_extract_to_oci(bfc_t* bfc, const char* output_dir) {
     return result;
   }
 
-  // Extract layer blobs using callback approach
+  // Extract layer blobs using callback approach. The prefix must match what
+  // bfc_add_oci_layer writes, hence the shared BFC_OCI_BLOB_PREFIX.
   struct extract_context ctx = {0};
-  result = bfc_list(bfc, "layers/", collect_files, &ctx);
+  result = bfc_list(bfc, BFC_OCI_BLOB_PREFIX, collect_files, &ctx);
   if (result != BFC_OK) {
     cleanup_extract_context(&ctx);
     return result;
   }
 
-  printf("Found %d layer files to extract\n", ctx.count);
-
   for (int i = 0; i < ctx.count; i++) {
     const char* file_path = ctx.files[i];
-    printf("Extracting layer: %s\n", file_path);
 
-    // Create output path in blobs/sha256/
+    // Container paths are "blobs/sha256/<hex>"; sha256_dir already IS that
+    // directory on disk, so only the blob name is appended (appending the whole
+    // container path would nest blobs/sha256/ twice).
+    const char* blob_name = strrchr(file_path, '/');
+    blob_name = blob_name ? blob_name + 1 : file_path;
+
     char output_path[1024];
-    if (snprintf(output_path, sizeof(output_path), "%s/%s", sha256_dir, file_path) >= (int) sizeof(output_path)) {
+    if (snprintf(output_path, sizeof(output_path), "%s/%s", sha256_dir, blob_name) >=
+        (int) sizeof(output_path)) {
       cleanup_extract_context(&ctx);
       return BFC_E_INVAL;
     }
-
-    // Create parent directories if needed
-    char* path_copy = strdup(output_path);
-    if (!path_copy) {
-      cleanup_extract_context(&ctx);
-      return BFC_E_NOTFOUND;
-    }
-
-    char* dir = dirname(path_copy);
-    if (mkdir(dir, 0755) != 0 && errno != EEXIST) {
-      free(path_copy);
-      cleanup_extract_context(&ctx);
-      return BFC_E_IO;
-    }
-    free(path_copy);
 
     // Open output file
     int out_fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -495,7 +523,8 @@ int bfc_list_oci_layers(bfc_t* bfc, bfc_oci_layer_t** layers, size_t* layer_coun
       char* d = cJSON_IsObject(item) ? oci_dup_str_field(item, "digest") : NULL;
       out[i].digest = d ? d : strdup("");
       out[i].media_type = cJSON_IsObject(item) ? oci_dup_str_field(item, "mediaType") : NULL;
-      const cJSON* sz = cJSON_IsObject(item) ? cJSON_GetObjectItemCaseSensitive(item, "size") : NULL;
+      const cJSON* sz =
+          cJSON_IsObject(item) ? cJSON_GetObjectItemCaseSensitive(item, "size") : NULL;
       if (cJSON_IsNumber(sz)) {
         out[i].size = (size_t) sz->valuedouble;
       }
@@ -563,7 +592,10 @@ void bfc_free_oci_manifest(bfc_oci_manifest_t* manifest) {
     free(manifest->layer_digests);
   }
 
-  free(manifest);
+  // Ownership: the caller owns the struct (the getters fill a caller-provided
+  // one, often a stack local), the library owns the fields. Zeroing makes a
+  // second call safe.
+  memset(manifest, 0, sizeof(*manifest));
 }
 
 // Free OCI config
@@ -579,7 +611,7 @@ void bfc_free_oci_config(bfc_oci_config_t* config) {
   free(config->rootfs);
   free(config->history);
 
-  free(config);
+  memset(config, 0, sizeof(*config));
 }
 
 // Free OCI layer
@@ -598,7 +630,7 @@ void bfc_free_oci_layer(bfc_oci_layer_t* layer) {
     free(layer->urls);
   }
 
-  free(layer);
+  memset(layer, 0, sizeof(*layer));
 }
 
 // Free OCI index
@@ -612,21 +644,25 @@ void bfc_free_oci_index(bfc_oci_index_t* index) {
 
   if (index->manifests) {
     for (size_t i = 0; i < index->manifest_count; i++) {
+      // manifests[] is an array of individually-allocated pointers owned by the
+      // index, so each one is released as well as its fields.
       bfc_free_oci_manifest(index->manifests[i]);
+      free(index->manifests[i]);
     }
     free(index->manifests);
   }
 
-  free(index);
+  memset(index, 0, sizeof(*index));
 }
 
-// Free OCI layers array
-void bfc_free_oci_layers(bfc_oci_layer_t** layers, size_t layer_count) {
+// Free the contiguous layer array produced by bfc_list_oci_layers.
+// Takes bfc_oci_layer_t* (one calloc'd block), NOT an array of pointers.
+void bfc_free_oci_layers(bfc_oci_layer_t* layers, size_t layer_count) {
   if (!layers)
     return;
 
   for (size_t i = 0; i < layer_count; i++) {
-    bfc_free_oci_layer(layers[i]);
+    bfc_free_oci_layer(&layers[i]);
   }
 
   free(layers);

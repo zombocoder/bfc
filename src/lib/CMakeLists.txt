@@ -85,9 +85,11 @@ foreach(target bfc bfc_shared)
     endif()
 
     if(BFC_WITH_OCI)
-        target_link_libraries(${target} ${CJSON_LIBRARIES})
+        # PkgConfig::CJSON carries includes, libs and link dirs; linking it in the
+        # plain signature propagates to consumers of bfc, so the CLI/tests/
+        # benchmarks/examples don't each need their own link-directories line.
+        target_link_libraries(${target} PkgConfig::CJSON)
         target_compile_definitions(${target} PRIVATE BFC_WITH_OCI)
-        target_include_directories(${target} PRIVATE ${CJSON_INCLUDE_DIRS})
     endif()
 endforeach()
 

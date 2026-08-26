@@ -112,12 +112,15 @@ int main() {
 
   manifest->schema_version = strdup("2");
   manifest->media_type = strdup("application/vnd.oci.image.manifest.v1+json");
-  manifest->config_digest = strdup("sha256:1111111111111111111111111111111111111111111111111111111111111111");
+  manifest->config_digest =
+      strdup("sha256:1111111111111111111111111111111111111111111111111111111111111111");
   manifest->config_size = 1024;
   manifest->layer_count = 2;
   manifest->layer_digests = calloc(2, sizeof(char*));
-  manifest->layer_digests[0] = strdup("sha256:2222222222222222222222222222222222222222222222222222222222222222");
-  manifest->layer_digests[1] = strdup("sha256:3333333333333333333333333333333333333333333333333333333333333333");
+  manifest->layer_digests[0] =
+      strdup("sha256:2222222222222222222222222222222222222222222222222222222222222222");
+  manifest->layer_digests[1] =
+      strdup("sha256:3333333333333333333333333333333333333333333333333333333333333333");
   manifest->annotations = strdup("{}");
 
   // Create OCI config (dynamic)
@@ -143,13 +146,15 @@ int main() {
   if (bfc_create_from_oci_manifest(bfc, manifest, config_json) != BFC_OK) {
     fprintf(stderr, "Failed to add OCI manifest to BFC\n");
     bfc_free_oci_manifest(manifest);
+    free(manifest);
     bfc_close(bfc);
     return 1;
   }
 
   // Add OCI layers
   bfc_oci_layer_t* layer1 = calloc(1, sizeof(bfc_oci_layer_t));
-  layer1->digest = strdup("sha256:2222222222222222222222222222222222222222222222222222222222222222");
+  layer1->digest =
+      strdup("sha256:2222222222222222222222222222222222222222222222222222222222222222");
   layer1->media_type = strdup("application/vnd.oci.image.layer.v1.tar+gzip");
   layer1->size = 1024 * 1024; // 1MB
 
@@ -158,7 +163,9 @@ int main() {
   if (!layer_data) {
     fprintf(stderr, "Failed to create layer data\n");
     bfc_free_oci_layer(layer1);
+    free(layer1);
     bfc_free_oci_manifest(manifest);
+    free(manifest);
     bfc_close(bfc);
     return 1;
   }
@@ -173,7 +180,9 @@ int main() {
     fprintf(stderr, "Failed to add OCI layer to BFC\n");
     fclose(layer_data);
     bfc_free_oci_layer(layer1);
+    free(layer1);
     bfc_free_oci_manifest(manifest);
+    free(manifest);
     bfc_close(bfc);
     return 1;
   }
@@ -184,7 +193,9 @@ int main() {
   if (bfc_finish(bfc) != BFC_OK) {
     fprintf(stderr, "Failed to finish BFC container\n");
     bfc_free_oci_layer(layer1);
+    free(layer1);
     bfc_free_oci_manifest(manifest);
+    free(manifest);
     bfc_close(bfc);
     return 1;
   }
@@ -194,7 +205,9 @@ int main() {
   // Cleanup
   free(config_json);
   bfc_free_oci_layer(layer1);
+  free(layer1);
   bfc_free_oci_manifest(manifest);
+  free(manifest);
   bfc_close(bfc);
 
   return 0;

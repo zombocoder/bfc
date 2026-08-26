@@ -112,7 +112,24 @@ void bfc_free_oci_layer(bfc_oci_layer_t* layer);
 void bfc_free_oci_index(bfc_oci_index_t* index);
 
 /// Free OCI layers array
-void bfc_free_oci_layers(bfc_oci_layer_t** layers, size_t layer_count);
+/*
+ * Memory ownership contract
+ * -------------------------
+ * The CALLER owns the struct; the LIBRARY owns the fields.
+ *
+ *   bfc_oci_manifest_t m = {0};
+ *   bfc_get_oci_manifest(bfc, &m);   // fills the caller's struct, allocates fields
+ *   ...
+ *   bfc_free_oci_manifest(&m);       // releases the FIELDS only, then zeroes m
+ *
+ * The bfc_free_oci_* helpers therefore never free() the struct itself, which
+ * makes them safe on stack locals and on members of a larger object. They also
+ * zero the struct, so calling them twice is harmless.
+ *
+ * bfc_list_oci_layers() is the one allocator of a block: it returns a single
+ * contiguous array, released with bfc_free_oci_layers(array, count).
+ */
+void bfc_free_oci_layers(bfc_oci_layer_t* layers, size_t layer_count);
 
 // OCI Image Specs constants
 #define BFC_OCI_MEDIA_TYPE_MANIFEST "application/vnd.oci.image.manifest.v1+json"
@@ -122,7 +139,8 @@ void bfc_free_oci_layers(bfc_oci_layer_t** layers, size_t layer_count);
 #define BFC_OCI_MEDIA_TYPE_LAYER_ZSTD "application/vnd.oci.image.layer.v1.tar+zstd"
 #define BFC_OCI_MEDIA_TYPE_INDEX "application/vnd.oci.image.index.v1+json"
 
-#define BFC_OCI_SCHEMA_VERSION "2" /* OCI image-manifest schemaVersion MUST be 2 (per OCI image-spec) */
+#define BFC_OCI_SCHEMA_VERSION                                                                     \
+  "2" /* OCI image-manifest schemaVersion MUST be 2 (per OCI image-spec) */
 
 #ifdef __cplusplus
 }

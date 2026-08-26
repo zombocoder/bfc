@@ -26,7 +26,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 #include <time.h>
 
 #ifdef BFC_WITH_SODIUM
@@ -258,9 +257,6 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
     print_verbose("Warning: cannot set timestamps on '%s': %s", output_path, strerror(errno));
   }
 #endif
-  // Close file descriptor after setting metadata
-  close(fd);
-
   // Close file descriptor after setting metadata
   close(fd);
 

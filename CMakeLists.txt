@@ -73,7 +73,10 @@ endif()
 
 if(BFC_WITH_OCI)
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(CJSON REQUIRED libcjson)
+    # IMPORTED_TARGET carries include dirs, libraries AND link directories in one
+    # go, so every consumer (lib, cli, tests, benchmarks, examples) links cleanly
+    # even where libcjson lives off the default linker path (Homebrew, /usr/local).
+    pkg_check_modules(CJSON REQUIRED IMPORTED_TARGET libcjson)
     message(STATUS "OCI image-specs support enabled")
 endif()
 
