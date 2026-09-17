@@ -91,3 +91,5 @@ coverage.info
 # codeql
 db-bfc
 *.sarif
+# graphify code-intel output (generated; never track)
+graphify-out/
