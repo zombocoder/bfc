@@ -25,6 +25,8 @@ typedef struct {
   const char* container_file;
   int deep_verify;
   int show_progress;
+  const char* encryption_password;
+  const char* encryption_keyfile;
 } verify_options_t;
 
 static void print_verify_help(void) {
@@ -33,6 +35,8 @@ static void print_verify_help(void) {
   printf("Options:\n");
   printf("  --deep                 Perform deep verification (read and check all file contents)\n");
   printf("  -p, --progress         Show progress during verification\n");
+  printf("  --password PASS        Password for encrypted container (needed for --deep)\n");
+  printf("  -K, --keyfile FILE     Key file for encrypted container (32 bytes)\n");
   printf("  -h, --help             Show this help message\n\n");
   printf("Arguments:\n");
   printf("  container.bfc          BFC container to verify\n\n");
@@ -40,6 +44,7 @@ static void print_verify_help(void) {
   printf("  bfc verify archive.bfc                # Quick structural verification\n");
   printf("  bfc verify --deep archive.bfc         # Full content verification\n");
   printf("  bfc verify -p --deep archive.bfc      # Deep verification with progress\n");
+  printf("  bfc verify --deep --password secret archive.bfc  # Deep verify encrypted container\n");
 }
 
 static int parse_verify_options(int argc, char* argv[], verify_options_t* opts) {
@@ -47,6 +52,8 @@ static int parse_verify_options(int argc, char* argv[], verify_options_t* opts) 
   opts->container_file = NULL;
   opts->deep_verify = 0;
   opts->show_progress = 0;
+  opts->encryption_password = NULL;
+  opts->encryption_keyfile = NULL;
 
   int i;
   for (i = 1; i < argc; i++) {
@@ -57,6 +64,18 @@ static int parse_verify_options(int argc, char* argv[], verify_options_t* opts) 
       opts->deep_verify = 1;
     } else if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--progress") == 0) {
       opts->show_progress = 1;
+    } else if (strcmp(argv[i], "--password") == 0) {
+      if (i + 1 >= argc) {
+        print_error("--password requires an argument");
+        return -1;
+      }
+      opts->encryption_password = argv[++i];
+    } else if (strcmp(argv[i], "-K") == 0 || strcmp(argv[i], "--keyfile") == 0) {
+      if (i + 1 >= argc) {
+        print_error("--keyfile requires an argument");
+        return -1;
+      }
+      opts->encryption_keyfile = argv[++i];
     } else if (argv[i][0] == '-') {
       // Handle combined short options like -p
       const char* opt = argv[i] + 1;
@@ -127,6 +146,42 @@ int cmd_verify(int argc, char* argv[]) {
     return 1;
   }
 
+  // Configure encryption if needed
+#ifdef BFC_WITH_SODIUM
+  if (opts.encryption_password) {
+    result = bfc_reader_set_encryption_password(reader, opts.encryption_password,
+                                                strlen(opts.encryption_password));
+    if (result != BFC_OK) {
+      print_error("Failed to set encryption password: %s", bfc_error_string(result));
+      bfc_close_read(reader);
+      return 1;
+    }
+  } else if (opts.encryption_keyfile) {
+    uint8_t key[32];
+    if (read_key_from_file(opts.encryption_keyfile, key) != 0) {
+      bfc_close_read(reader);
+      return 1;
+    }
+
+    result = bfc_reader_set_encryption_key(reader, key);
+
+    // Clear key from memory
+    memset(key, 0, sizeof(key));
+
+    if (result != BFC_OK) {
+      print_error("Failed to set encryption key: %s", bfc_error_string(result));
+      bfc_close_read(reader);
+      return 1;
+    }
+  }
+#else
+  if (opts.encryption_password || opts.encryption_keyfile) {
+    print_error("Encryption support not available. Please build with BFC_WITH_SODIUM=ON");
+    bfc_close_read(reader);
+    return 1;
+  }
+#endif
+
   if (!g_options.quiet) {
     printf("Verifying container: %s\n", opts.container_file);
     if (opts.deep_verify) {
@@ -185,13 +240,20 @@ int cmd_verify(int argc, char* argv[]) {
       print_error("The file is not a valid BFC container or is corrupted");
       break;
     case BFC_E_CRC:
-      print_error("CRC32C checksum mismatch detected - data corruption");
+      if (opts.encryption_password || opts.encryption_keyfile) {
+        print_error("Checksum mismatch - wrong password/key or data corruption");
+      } else {
+        print_error("CRC32C checksum mismatch detected - data corruption");
+      }
       break;
     case BFC_E_IO:
       print_error("I/O error occurred while reading the container");
       break;
     case BFC_E_INVAL:
       print_error("Invalid container structure or format");
+      break;
+    case BFC_E_PERM:
+      print_error("Container content is encrypted; pass --password or --keyfile to verify it");
       break;
     default:
       break;

@@ -48,6 +48,17 @@ static int test_known_values(void) {
   return 0;
 }
 
+static int test_format_check_value(void) {
+  // Pins the on-disk checksum definition: Castagnoli polynomial, initial value 0,
+  // no final XOR. Hardware and software paths must both produce this value,
+  // otherwise containers stop verifying across machines. (The standard CRC32C
+  // check value, with ~0 init and final XOR, would be 0xE3069283.)
+  const char* check = "123456789";
+  assert(bfc_crc32c_compute(check, strlen(check)) == 0x58E3FA20U);
+
+  return 0;
+}
+
 static int test_streaming_crc(void) {
   const char* data = "hello world";
   size_t len = strlen(data);
@@ -260,6 +271,8 @@ int test_crc32c(void) {
   if (test_empty_crc() != 0)
     return 1;
   if (test_known_values() != 0)
+    return 1;
+  if (test_format_check_value() != 0)
     return 1;
   if (test_streaming_crc() != 0)
     return 1;

@@ -26,6 +26,11 @@
 #endif
 #include <immintrin.h>
 #define HAS_X86_64 1
+#ifdef _MSC_VER
+#define BFC_TARGET_SSE42
+#else
+#define BFC_TARGET_SSE42 __attribute__((target("sse4.2")))
+#endif
 #elif defined(__aarch64__) || defined(_M_ARM64)
 #include <arm_acle.h>
 #define HAS_ARM64 1
@@ -68,7 +73,9 @@ static int detect_sse42_support(void) {
 #endif
 }
 
-static uint32_t crc32c_hw_x86(uint32_t crc, const void* data, size_t len) {
+// Only this function is compiled for SSE4.2, so the rest of the library stays
+// runnable on CPUs without it; detect_sse42_support() gates the call.
+static BFC_TARGET_SSE42 uint32_t crc32c_hw_x86(uint32_t crc, const void* data, size_t len) {
   const uint8_t* ptr = (const uint8_t*) data;
 
   // Process aligned 8-byte chunks
@@ -164,14 +171,16 @@ static uint32_t crc32c_hw_arm(uint32_t crc, const void* data, size_t len) {
 }
 #endif
 
+// Must match the hardware paths bit for bit: the CRC32 instructions apply no
+// pre/post inversion, so neither does this. Containers written on one machine
+// have to verify on any other.
 static uint32_t crc32c_sw(uint32_t crc, const void* data, size_t len) {
   const uint8_t* ptr = (const uint8_t*) data;
 
-  crc = ~crc;
   for (size_t i = 0; i < len; i++) {
     crc = crc32c_table[(crc ^ ptr[i]) & 0xFF] ^ (crc >> 8);
   }
-  return ~crc;
+  return crc;
 }
 
 void bfc_crc32c_init(void) {
