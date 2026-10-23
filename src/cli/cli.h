@@ -57,6 +57,7 @@ void print_error(const char* format, ...);
 void print_verbose(const char* format, ...);
 int parse_global_options(int* argc, char*** argv, bfc_options_t* opts);
 const char* bfc_error_string(int error_code);
+int read_key_from_file(const char* keyfile, uint8_t key[32]);
 
 // Global options (extern declaration)
 extern bfc_options_t g_options;

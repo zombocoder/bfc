@@ -15,8 +15,10 @@
  */
 
 #include "cli.h"
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 
 void print_error(const char* format, ...) {
   va_list args;
@@ -38,6 +40,25 @@ void print_verbose(const char* format, ...) {
   vfprintf(stderr, format, args);
   fprintf(stderr, "\n");
   va_end(args);
+}
+
+// Read a 32-byte encryption key from a file
+int read_key_from_file(const char* keyfile, uint8_t key[32]) {
+  FILE* f = fopen(keyfile, "rb");
+  if (!f) {
+    print_error("Cannot open key file '%s': %s", keyfile, strerror(errno));
+    return -1;
+  }
+
+  size_t bytes_read = fread(key, 1, 32, f);
+  fclose(f);
+
+  if (bytes_read != 32) {
+    print_error("Key file '%s' must contain exactly 32 bytes (got %zu)", keyfile, bytes_read);
+    return -1;
+  }
+
+  return 0;
 }
 
 const char* bfc_error_string(int error_code) {

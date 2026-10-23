@@ -148,6 +148,10 @@ struct BfcFooter {
 ## Integrity Guarantees
 
 - **CRC32C** used for content validation (hardware accelerated when available)
+  - Castagnoli polynomial (reflected `0x82F63B78`), initial value `0`, no final XOR
+  - This is what the SSE4.2/ARMv8 CRC32C instructions compute directly; it is not
+    the conventional CRC32C (`~0` init, final XOR). Check value for `"123456789"`
+    is `0x58E3FA20`
 - **Atomic commits** via index+footer write with fsync
 - **Crash recovery** possible by scanning for previous valid footer
 - **Tamper detection** via checksum validation on read
