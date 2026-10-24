@@ -56,16 +56,26 @@ target_include_directories(unit_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/lib
 )
 
+# Each test runs in a directory of its own. The tests create containers under
+# fixed relative names (e.g. "test_encrypted.bfc"), and unit_all repeats every
+# suite, so under `ctest --parallel` two processes would otherwise unlink and
+# rewrite the same files at the same time.
+function(bfc_add_unit_test name)
+    set(dir ${CMAKE_CURRENT_BINARY_DIR}/run/${name})
+    file(MAKE_DIRECTORY ${dir})
+    add_test(NAME ${name} COMMAND unit_tests ${ARGN} WORKING_DIRECTORY ${dir})
+endfunction()
+
 # Add individual tests
-add_test(NAME unit_format COMMAND unit_tests format)
-add_test(NAME unit_crc32c COMMAND unit_tests crc32c)
-add_test(NAME unit_path COMMAND unit_tests path)
-add_test(NAME unit_writer COMMAND unit_tests writer)
-add_test(NAME unit_reader COMMAND unit_tests reader)
-add_test(NAME unit_util COMMAND unit_tests util)
-add_test(NAME unit_os COMMAND unit_tests os)
-add_test(NAME unit_compress COMMAND unit_tests compress)
-add_test(NAME unit_encrypt COMMAND unit_tests encrypt)
-add_test(NAME unit_oci COMMAND unit_tests oci)
-# add_test(NAME unit_encrypt_integration COMMAND unit_tests encrypt_integration)  # Disabled
-add_test(NAME unit_all COMMAND unit_tests)
+bfc_add_unit_test(unit_format format)
+bfc_add_unit_test(unit_crc32c crc32c)
+bfc_add_unit_test(unit_path path)
+bfc_add_unit_test(unit_writer writer)
+bfc_add_unit_test(unit_reader reader)
+bfc_add_unit_test(unit_util util)
+bfc_add_unit_test(unit_os os)
+bfc_add_unit_test(unit_compress compress)
+bfc_add_unit_test(unit_encrypt encrypt)
+bfc_add_unit_test(unit_oci oci)
+# bfc_add_unit_test(unit_encrypt_integration encrypt_integration)  # Disabled
+bfc_add_unit_test(unit_all)
