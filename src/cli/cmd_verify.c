@@ -25,8 +25,7 @@ typedef struct {
   const char* container_file;
   int deep_verify;
   int show_progress;
-  const char* encryption_password;
-  const char* encryption_keyfile;
+  cli_credentials_t creds;
 } verify_options_t;
 
 static void print_verify_help(void) {
@@ -34,8 +33,9 @@ static void print_verify_help(void) {
   printf("Verify integrity of a BFC container.\n\n");
   printf("Options:\n");
   printf("  --deep                 Perform deep verification (read and check all file contents)\n");
-  printf("  -p, --progress         Show progress during verification\n");
-  printf("  --password PASS        Password for encrypted container (needed for --deep)\n");
+  printf("      --progress         Show progress during verification\n");
+  printf("  -p, --password PASS    Password for encrypted container (needed for --deep)\n");
+  printf("      --password-file FILE  Read the password from FILE (- for stdin)\n");
   printf("  -K, --keyfile FILE     Key file for encrypted container (32 bytes)\n");
   printf("  -h, --help             Show this help message\n\n");
   printf("Arguments:\n");
@@ -43,8 +43,8 @@ static void print_verify_help(void) {
   printf("Examples:\n");
   printf("  bfc verify archive.bfc                # Quick structural verification\n");
   printf("  bfc verify --deep archive.bfc         # Full content verification\n");
-  printf("  bfc verify -p --deep archive.bfc      # Deep verification with progress\n");
-  printf("  bfc verify --deep --password secret archive.bfc  # Deep verify encrypted container\n");
+  printf("  bfc verify --progress --deep archive.bfc  # Deep verification with progress\n");
+  printf("  bfc verify --deep -p secret archive.bfc   # Deep verify encrypted container\n");
 }
 
 static int parse_verify_options(int argc, char* argv[], verify_options_t* opts) {
@@ -52,44 +52,24 @@ static int parse_verify_options(int argc, char* argv[], verify_options_t* opts) 
   opts->container_file = NULL;
   opts->deep_verify = 0;
   opts->show_progress = 0;
-  opts->encryption_password = NULL;
-  opts->encryption_keyfile = NULL;
+  cli_credentials_init(&opts->creds);
 
-  int i;
+  int i, cred;
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
       print_verify_help();
       return 1;
     } else if (strcmp(argv[i], "--deep") == 0) {
       opts->deep_verify = 1;
-    } else if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--progress") == 0) {
+    } else if (strcmp(argv[i], "--progress") == 0) {
       opts->show_progress = 1;
-    } else if (strcmp(argv[i], "--password") == 0) {
-      if (i + 1 >= argc) {
-        print_error("--password requires an argument");
+    } else if ((cred = cli_parse_credential_option(argc, argv, &i, &opts->creds)) != 0) {
+      if (cred < 0) {
         return -1;
       }
-      opts->encryption_password = argv[++i];
-    } else if (strcmp(argv[i], "-K") == 0 || strcmp(argv[i], "--keyfile") == 0) {
-      if (i + 1 >= argc) {
-        print_error("--keyfile requires an argument");
-        return -1;
-      }
-      opts->encryption_keyfile = argv[++i];
     } else if (argv[i][0] == '-') {
-      // Handle combined short options like -p
-      const char* opt = argv[i] + 1;
-      while (*opt) {
-        switch (*opt) {
-        case 'p':
-          opts->show_progress = 1;
-          break;
-        default:
-          print_error("Unknown option: -%c", *opt);
-          return -1;
-        }
-        opt++;
-      }
+      print_error("Unknown option: %s", argv[i]);
+      return -1;
     } else {
       // Non-option argument is the container file
       if (!opts->container_file) {
@@ -106,7 +86,7 @@ static int parse_verify_options(int argc, char* argv[], verify_options_t* opts) 
     return -1;
   }
 
-  return 0;
+  return cli_credentials_check(&opts->creds);
 }
 
 // Progress callback for deep verification
@@ -146,41 +126,14 @@ int cmd_verify(int argc, char* argv[]) {
     return 1;
   }
 
-  // Configure encryption if needed
-#ifdef BFC_WITH_SODIUM
-  if (opts.encryption_password) {
-    result = bfc_reader_set_encryption_password(reader, opts.encryption_password,
-                                                strlen(opts.encryption_password));
-    if (result != BFC_OK) {
-      print_error("Failed to set encryption password: %s", bfc_error_string(result));
-      bfc_close_read(reader);
-      return 1;
-    }
-  } else if (opts.encryption_keyfile) {
-    uint8_t key[32];
-    if (read_key_from_file(opts.encryption_keyfile, key) != 0) {
-      bfc_close_read(reader);
-      return 1;
-    }
-
-    result = bfc_reader_set_encryption_key(reader, key);
-
-    // Clear key from memory
-    memset(key, 0, sizeof(key));
-
-    if (result != BFC_OK) {
-      print_error("Failed to set encryption key: %s", bfc_error_string(result));
-      bfc_close_read(reader);
-      return 1;
-    }
-  }
-#else
-  if (opts.encryption_password || opts.encryption_keyfile) {
-    print_error("Encryption support not available. Please build with BFC_WITH_SODIUM=ON");
+  // Configure encryption if needed. Only deep verification reads content, so
+  // only then is it worth prompting for a password.
+  int enc_result = cli_apply_reader_credentials(reader, &opts.creds, opts.deep_verify);
+  cli_credentials_free(&opts.creds);
+  if (enc_result < 0) {
     bfc_close_read(reader);
     return 1;
   }
-#endif
 
   if (!g_options.quiet) {
     printf("Verifying container: %s\n", opts.container_file);
@@ -240,7 +193,7 @@ int cmd_verify(int argc, char* argv[]) {
       print_error("The file is not a valid BFC container or is corrupted");
       break;
     case BFC_E_CRC:
-      if (opts.encryption_password || opts.encryption_keyfile) {
+      if (enc_result > 0) {
         print_error("Checksum mismatch - wrong password/key or data corruption");
       } else {
         print_error("CRC32C checksum mismatch detected - data corruption");

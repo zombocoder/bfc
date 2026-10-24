@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
+#include "bfc_format.h"
 #include "cli.h"
 #ifndef _WIN32
-#include <libgen.h>
 #include <sys/time.h>
 #include <unistd.h>
 #endif
@@ -30,13 +30,12 @@
 
 typedef struct {
   int force;
-  int preserve_paths;
+  int flatten;
   const char* output_dir;
   const char* container_file;
   const char** extract_paths;
   int num_paths;
-  const char* encryption_password;
-  const char* encryption_keyfile;
+  cli_credentials_t creds;
 } extract_options_t;
 
 static void print_extract_help(void) {
@@ -45,18 +44,22 @@ static void print_extract_help(void) {
   printf("Options:\n");
   printf("  -C, --directory DIR    Change to directory DIR before extracting\n");
   printf("  -f, --force            Overwrite existing files\n");
-  printf("  -k, --keep-paths       Preserve full directory paths when extracting\n");
+  printf("      --flatten          Drop directories: extract every file by its name only\n");
   printf("  -p, --password PASS    Password for encrypted container\n");
+  printf("      --password-file FILE  Read the password from FILE (- for stdin)\n");
   printf("  -K, --keyfile FILE     Key file for encrypted container (32 bytes)\n");
   printf("  -h, --help             Show this help message\n\n");
   printf("Arguments:\n");
   printf("  container.bfc          BFC container to extract from\n");
   printf("  paths                  Optional paths to extract (default: all)\n\n");
+  printf("Directory paths from the container are recreated under the output\n");
+  printf("directory. Entries with absolute paths or '..' components, and entries\n");
+  printf("that would be written through a symlink, are refused.\n\n");
   printf("Examples:\n");
   printf("  bfc extract archive.bfc                   # Extract all files\n");
   printf("  bfc extract -C /tmp archive.bfc           # Extract to /tmp\n");
   printf("  bfc extract archive.bfc docs/             # Extract docs/ directory\n");
-  printf("  bfc extract -k archive.bfc file.txt       # Extract preserving path\n");
+  printf("  bfc extract --flatten archive.bfc         # All files into one directory\n");
   printf("  bfc extract -p secret archive.bfc         # Extract encrypted container\n");
   printf("  bfc extract -K key.bin archive.bfc        # Extract with key file\n");
 }
@@ -64,15 +67,14 @@ static void print_extract_help(void) {
 static int parse_extract_options(int argc, char* argv[], extract_options_t* opts) {
   // Initialize options
   opts->force = 0;
-  opts->preserve_paths = 0;
+  opts->flatten = 0;
   opts->output_dir = NULL;
   opts->container_file = NULL;
   opts->extract_paths = NULL;
   opts->num_paths = 0;
-  opts->encryption_password = NULL;
-  opts->encryption_keyfile = NULL;
+  cli_credentials_init(&opts->creds);
 
-  int i;
+  int i, cred;
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
       print_extract_help();
@@ -80,25 +82,23 @@ static int parse_extract_options(int argc, char* argv[], extract_options_t* opts
     } else if (strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--force") == 0) {
       opts->force = 1;
     } else if (strcmp(argv[i], "-k") == 0 || strcmp(argv[i], "--keep-paths") == 0) {
-      opts->preserve_paths = 1;
+      // Paths are preserved by default now; -K is the key-file option.
+      fprintf(stderr,
+              "Warning: %s is deprecated and has no effect: paths are preserved by "
+              "default (use -K for a key file)\n",
+              argv[i]);
+    } else if (strcmp(argv[i], "--flatten") == 0) {
+      opts->flatten = 1;
     } else if (strcmp(argv[i], "-C") == 0 || strcmp(argv[i], "--directory") == 0) {
       if (i + 1 >= argc) {
         print_error("--directory requires an argument");
         return -1;
       }
       opts->output_dir = argv[++i];
-    } else if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--password") == 0) {
-      if (i + 1 >= argc) {
-        print_error("--password requires an argument");
+    } else if ((cred = cli_parse_credential_option(argc, argv, &i, &opts->creds)) != 0) {
+      if (cred < 0) {
         return -1;
       }
-      opts->encryption_password = argv[++i];
-    } else if (strcmp(argv[i], "-K") == 0 || strcmp(argv[i], "--keyfile") == 0) {
-      if (i + 1 >= argc) {
-        print_error("--keyfile requires an argument");
-        return -1;
-      }
-      opts->encryption_keyfile = argv[++i];
     } else if (argv[i][0] == '-') {
       // Handle combined short options like -fk
       const char* opt = argv[i] + 1;
@@ -108,7 +108,8 @@ static int parse_extract_options(int argc, char* argv[], extract_options_t* opts
           opts->force = 1;
           break;
         case 'k':
-          opts->preserve_paths = 1;
+          fprintf(stderr, "Warning: -k is deprecated and has no effect: paths are preserved by "
+                          "default (use -K for a key file)\n");
           break;
         default:
           print_error("Unknown option: -%c", *opt);
@@ -134,50 +135,46 @@ static int parse_extract_options(int argc, char* argv[], extract_options_t* opts
     return -1;
   }
 
-  return 0;
+  return cli_credentials_check(&opts->creds);
 }
 
+// Create every missing parent directory of path. Walks the components in
+// place: dirname() returns a static buffer on some systems (macOS), which a
+// recursive implementation overwrites.
 static int create_parent_directories(const char* path, int force) {
-  char* path_copy = strdup(path);
-  if (!path_copy) {
+  (void) force;
+  char* buf = strdup(path);
+  if (!buf) {
     return -1;
   }
 
-  char* dir = dirname(path_copy);
-  if (strcmp(dir, ".") == 0 || strcmp(dir, "/") == 0) {
-    free(path_copy);
-    return 0;
-  }
-
-  // Recursively create parent directories first
-  if (create_parent_directories(dir, force) != 0) {
-    free(path_copy);
-    return -1;
-  }
-
-  print_verbose("Creating directory: %s", dir);
+  for (char* p = buf + 1; (p = strchr(p, '/')) != NULL; p++) {
+    *p = '\0';
+    print_verbose("Creating directory: %s", buf);
 #ifdef _WIN32
-  if (mkdir(dir) != 0) {
+    int rc = mkdir(buf);
 #else
-  if (mkdir(dir, 0755) != 0) {
+    int rc = mkdir(buf, 0755);
 #endif
-    if (errno == EEXIST) {
-      // Directory already exists - verify it is actually a directory
-      struct stat st;
-      if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
-        print_error("'%s' exists but is not a directory", dir);
-        free(path_copy);
+    if (rc != 0) {
+      if (errno == EEXIST) {
+        // Already exists - verify it is actually a directory
+        struct stat st;
+        if (stat(buf, &st) != 0 || !S_ISDIR(st.st_mode)) {
+          print_error("'%s' exists but is not a directory", buf);
+          free(buf);
+          return -1;
+        }
+      } else {
+        print_error("Cannot create directory '%s': %s", buf, strerror(errno));
+        free(buf);
         return -1;
       }
-      // Already a directory, that is fine
-    } else {
-      print_error("Cannot create directory '%s': %s", dir, strerror(errno));
-      free(path_copy);
-      return -1;
     }
+    *p = '/';
   }
 
-  free(path_copy);
+  free(buf);
   return 0;
 }
 
@@ -417,6 +414,110 @@ static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* 
   return 0;
 }
 
+// Refuse entry paths that could land outside the output directory. The writer
+// normalizes paths, but the reader takes them from the index as stored, so a
+// hand-made container can hold anything.
+static int entry_path_is_safe(const char* path) {
+  if (bfc_path_validate(path) != BFC_OK) {
+    return 0; // absolute, empty, or contains ".." components
+  }
+#ifdef _WIN32
+  // On Windows "\\" is also a separator and "C:" a drive prefix
+  if (strchr(path, '\\') || strchr(path, ':')) {
+    return 0;
+  }
+#endif
+  return 1;
+}
+
+// Return 1 if any parent component of path (relative to the current directory)
+// is a symlink. Writing below one would follow it, possibly out of the output
+// directory, since O_NOFOLLOW only covers the last component.
+static int has_symlink_parent(const char* path) {
+#ifdef _WIN32
+  (void) path;
+  return 0; // symlinks are never created on Windows
+#else
+  char buf[1024];
+  size_t len = strlen(path);
+  if (len >= sizeof(buf)) {
+    return 1;
+  }
+  memcpy(buf, path, len + 1);
+
+  for (char* p = buf; (p = strchr(p, '/')) != NULL; p++) {
+    struct stat st;
+    *p = '\0';
+    int is_link = lstat(buf, &st) == 0 && S_ISLNK(st.st_mode);
+    *p = '/';
+    if (is_link) {
+      return 1;
+    }
+  }
+  return 0;
+#endif
+}
+
+// Set of output names already used in --flatten mode, to catch two entries
+// that would be written to the same file.
+typedef struct {
+  char** slots;
+  size_t cap;
+  size_t used;
+} name_set_t;
+
+static uint64_t name_hash(const char* s) {
+  uint64_t h = 1469598103934665603ULL; // FNV-1a
+  for (; *s; s++) {
+    h = (h ^ (unsigned char) *s) * 1099511628211ULL;
+  }
+  return h;
+}
+
+// Returns 1 if added, 0 if already present, -1 on allocation failure.
+static int name_set_add(name_set_t* set, const char* name) {
+  if (set->used * 2 >= set->cap) {
+    size_t ncap = set->cap ? set->cap * 2 : 64;
+    char** nslots = calloc(ncap, sizeof(char*));
+    if (!nslots) {
+      return -1;
+    }
+    for (size_t i = 0; i < set->cap; i++) {
+      if (set->slots[i]) {
+        size_t j = name_hash(set->slots[i]) & (ncap - 1);
+        while (nslots[j]) {
+          j = (j + 1) & (ncap - 1);
+        }
+        nslots[j] = set->slots[i];
+      }
+    }
+    free(set->slots);
+    set->slots = nslots;
+    set->cap = ncap;
+  }
+
+  size_t j = name_hash(name) & (set->cap - 1);
+  while (set->slots[j]) {
+    if (strcmp(set->slots[j], name) == 0) {
+      return 0;
+    }
+    j = (j + 1) & (set->cap - 1);
+  }
+  set->slots[j] = strdup(name);
+  if (!set->slots[j]) {
+    return -1;
+  }
+  set->used++;
+  return 1;
+}
+
+static void name_set_free(name_set_t* set) {
+  for (size_t i = 0; i < set->cap; i++) {
+    free(set->slots[i]);
+  }
+  free(set->slots);
+}
+
 // Extract callback structure
 typedef struct {
   extract_options_t* opts;
@@ -424,6 +525,7 @@ typedef struct {
   const char* output_dir;
   int count;
   int errors;
+  name_set_t flat_names;
 } extract_context_t;
 
 static int extract_entry_callback(const bfc_entry_t* entry, void* user) {
@@ -432,27 +534,54 @@ static int extract_entry_callback(const bfc_entry_t* entry, void* user) {
 
   ctx->count++;
 
+  if (!entry_path_is_safe(entry->path)) {
+    print_error("Refusing to extract '%s': unsafe path", entry->path);
+    ctx->errors++;
+    return 0;
+  }
+
   // Determine output path
   char output_path[1024];
-  const char* extract_name;
+  const char* extract_name = entry->path;
 
-  if (opts->preserve_paths) {
-    extract_name = entry->path;
-  } else {
-    // Use basename only
-    extract_name = strrchr(entry->path, '/');
-    extract_name = extract_name ? extract_name + 1 : entry->path;
+  if (opts->flatten) {
+    // Directories have nothing to hold once paths are dropped
+    if (S_ISDIR(entry->mode)) {
+      return 0;
+    }
+    const char* slash = strrchr(entry->path, '/');
+    extract_name = slash ? slash + 1 : entry->path;
 
-    // Skip if basename is empty (root directory)
-    if (strlen(extract_name) == 0) {
+    int added = name_set_add(&ctx->flat_names, extract_name);
+    if (added <= 0) {
+      if (added == 0) {
+        print_error("Refusing to extract '%s': another entry was already extracted as '%s' "
+                    "(drop --flatten to keep directories)",
+                    entry->path, extract_name);
+      } else {
+        print_error("Out of memory");
+      }
+      ctx->errors++;
       return 0;
     }
   }
 
+  int n;
   if (ctx->output_dir) {
-    snprintf(output_path, sizeof(output_path), "%s/%s", ctx->output_dir, extract_name);
+    n = snprintf(output_path, sizeof(output_path), "%s/%s", ctx->output_dir, extract_name);
   } else {
-    snprintf(output_path, sizeof(output_path), "%s", extract_name);
+    n = snprintf(output_path, sizeof(output_path), "%s", extract_name);
+  }
+  if (n < 0 || (size_t) n >= sizeof(output_path)) {
+    print_error("Refusing to extract '%s': path too long", entry->path);
+    ctx->errors++;
+    return 0;
+  }
+
+  if (has_symlink_parent(output_path)) {
+    print_error("Refusing to extract '%s': a parent directory is a symlink", entry->path);
+    ctx->errors++;
+    return 0;
   }
 
   // Extract based on entry type
@@ -492,6 +621,15 @@ int cmd_extract(int argc, char* argv[]) {
     return 1;
   }
 
+  // Configure encryption before changing directory, so relative paths to
+  // --password-file and --keyfile resolve against the caller's directory
+  int enc_result = cli_apply_reader_credentials(reader, &opts.creds, 1);
+  cli_credentials_free(&opts.creds);
+  if (enc_result < 0) {
+    bfc_close_read(reader);
+    return 1;
+  }
+
   // Change to output directory if specified (after opening container)
   if (opts.output_dir) {
     print_verbose("Changing to directory: %s", opts.output_dir);
@@ -502,43 +640,8 @@ int cmd_extract(int argc, char* argv[]) {
     }
   }
 
-  // Configure encryption if needed
-#ifdef BFC_WITH_SODIUM
-  if (opts.encryption_password) {
-    result = bfc_reader_set_encryption_password(reader, opts.encryption_password,
-                                                strlen(opts.encryption_password));
-    if (result != BFC_OK) {
-      print_error("Failed to set encryption password: %s", bfc_error_string(result));
-      bfc_close_read(reader);
-      return 1;
-    }
-  } else if (opts.encryption_keyfile) {
-    uint8_t key[32];
-    if (read_key_from_file(opts.encryption_keyfile, key) != 0) {
-      bfc_close_read(reader);
-      return 1;
-    }
-
-    result = bfc_reader_set_encryption_key(reader, key);
-    if (result != BFC_OK) {
-      print_error("Failed to set encryption key: %s", bfc_error_string(result));
-      bfc_close_read(reader);
-      return 1;
-    }
-
-    // Clear key from memory
-    memset(key, 0, sizeof(key));
-  }
-#else
-  if (opts.encryption_password || opts.encryption_keyfile) {
-    print_error("Encryption support not available. Please build with BFC_WITH_SODIUM=ON");
-    bfc_close_read(reader);
-    return 1;
-  }
-#endif
-
   // Extract entries
-  extract_context_t ctx = {&opts, reader, NULL, 0, 0};
+  extract_context_t ctx = {&opts, reader, NULL, 0, 0, {NULL, 0, 0}};
 
   if (opts.num_paths == 0) {
     // Extract all entries
@@ -554,6 +657,8 @@ int cmd_extract(int argc, char* argv[]) {
       }
     }
   }
+
+  name_set_free(&ctx.flat_names);
 
   if (result != BFC_OK) {
     print_error("Failed to list container contents: %s", bfc_error_string(result));
