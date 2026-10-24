@@ -20,6 +20,7 @@ set(BFC_CLI_SOURCES
     cmd_extract.c
     cmd_verify.c
     cli_util.c
+    cli_credentials.c
 )
 
 add_executable(bfc_cli ${BFC_CLI_SOURCES})

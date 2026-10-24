@@ -162,8 +162,10 @@ The `create` command builds new BFC containers from files and directories.
 - `-c, --compression TYPE` - Compression: `none`, `zstd`, `auto` (default: none)
 - `-l, --compression-level N` - Compression level for ZSTD (1-22, default: 3)
 - `-t, --compression-threshold SIZE` - Minimum file size to compress (default: 64 bytes)
-- `-e, --encrypt PASSWORD` - Encrypt files with password (requires libsodium)
-- `-k, --keyfile FILE` - Encrypt with 32-byte key from file (requires libsodium)
+- `-p, --password PASS` - Encrypt files with password (requires libsodium)
+- `--password-file FILE` - Read the password from FILE, `-` for stdin (keeps it out of `ps` and shell history)
+- `-K, --keyfile FILE` - Encrypt with 32-byte key from file (requires libsodium)
+- `-e, --encrypt` and `-k` are deprecated spellings of `-p` and `-K`
 
 **Examples:**
 ```bash
@@ -184,11 +186,12 @@ bfc create -c zstd archive.bfc /data/
 bfc create -c zstd -l 9 archive.bfc /data/  # Maximum compression
 
 # Create with encryption
-bfc create -e mypassword secure.bfc /sensitive/data/
-bfc create -k secret.key secure.bfc /sensitive/data/
+bfc create -p mypassword secure.bfc /sensitive/data/
+bfc create --password-file pass.txt secure.bfc /sensitive/data/
+bfc create -K secret.key secure.bfc /sensitive/data/
 
 # Combined compression and encryption
-bfc create -c zstd -e secret -l 6 archive.bfc /data/
+bfc create -c zstd -p secret -l 6 archive.bfc /data/
 ```
 
 ### Compression support
@@ -231,17 +234,21 @@ BFC supports optional file encryption using industry-standard ChaCha20-Poly1305 
 
 ```bash
 # Password-based encryption
-bfc create -e mypassword secure.bfc /sensitive/data/
+bfc create -p mypassword secure.bfc /sensitive/data/
 
 # Key file encryption (32 bytes)
 echo -n "0123456789abcdef0123456789abcdef" > secret.key
-bfc create -k secret.key secure.bfc /sensitive/data/
+bfc create -K secret.key secure.bfc /sensitive/data/
 
 # Combine encryption with compression
-bfc create -e mypassword -c zstd archive.bfc /data/
+bfc create -p mypassword -c zstd archive.bfc /data/
 
 # Extract encrypted container with password
 bfc extract -p mypassword secure.bfc
+
+# Without -p, --password-file or -K, extract asks for the password on the
+# terminal (only when stdin is a terminal)
+bfc extract secure.bfc
 
 # Extract with key file
 bfc extract -K secret.key secure.bfc
@@ -310,20 +317,24 @@ The `extract` command extracts files and directories from containers.
 **Options:**
 - `-C, --directory DIR` - Extract to specific directory (changes to DIR before extracting)
 - `-f, --force` - Overwrite existing files without prompting
-- `-k, --keep-paths` - Preserve full directory structure (default: flatten to basenames)
+- `--flatten` - Drop directories and extract every file by its name only. Fails if two entries have the same name, even with `-f`
 - `-p, --password PASS` - Provide password for encrypted containers
+- `--password-file FILE` - Read the password from FILE (`-` for stdin)
 - `-K, --keyfile FILE` - Use key file for encrypted containers (32 bytes)
+- `-k, --keep-paths` - Deprecated, no effect: directory paths are preserved by default
+
+Directory paths are recreated under the output directory. Entries with absolute paths or `..` components, and entries that would be written through a symlink, are refused.
 
 **Examples:**
 ```bash
-# Extract all files to current directory (flattened)
+# Extract all files to the current directory, keeping directory paths
 bfc extract archive.bfc
 
 # Extract to specific directory
 bfc extract -C /tmp/extracted archive.bfc
 
-# Extract preserving directory structure
-bfc extract -k archive.bfc
+# Extract every file into one directory, without subdirectories
+bfc extract --flatten archive.bfc
 
 # Extract specific files/directories only
 bfc extract archive.bfc docs/ README.txt
@@ -337,8 +348,8 @@ bfc extract -p mypassword secure.bfc
 # Extract encrypted container with key file  
 bfc extract -K secret.key secure.bfc
 
-# Combined: extract to directory, preserve paths, force overwrite
-bfc extract -kf -C /tmp/output archive.bfc
+# Combined: extract to directory, force overwrite
+bfc extract -f -C /tmp/output archive.bfc
 ```
 
 ### Container information
@@ -373,7 +384,8 @@ The `verify` command checks container and file integrity.
 
 **Options:**
 - `--deep` - Perform deep verification (read and verify all file contents, slower but thorough)
-- `-p, --progress` - Show progress bar during verification (useful for large containers)
+- `--progress` - Show progress during verification (useful for large containers)
+- `-p, --password PASS`, `--password-file FILE`, `-K, --keyfile FILE` - Credentials for encrypted containers, needed for `--deep`
 
 **Examples:**
 ```bash
@@ -384,7 +396,10 @@ bfc verify archive.bfc
 bfc verify --deep archive.bfc
 
 # Deep verification with progress indicator
-bfc verify -p --deep archive.bfc
+bfc verify --progress --deep archive.bfc
+
+# Deep verification of an encrypted container
+bfc verify --deep -p mypassword secure.bfc
 ```
 
 ## Library Usage
@@ -473,8 +488,9 @@ See the [examples/](examples/) directory for complete examples.
 -c, --compression TYPE      none|zstd|auto (default: none)
 -l, --compression-level N   ZSTD level 1-22 (default: 3)
 -t, --compression-threshold SIZE  Min size to compress (default: 64)
--e, --encrypt PASSWORD      Encrypt with password
--k, --keyfile FILE          Encrypt with key file (32 bytes)
+-p, --password PASS         Encrypt with password
+    --password-file FILE    Read the password from FILE (- for stdin)
+-K, --keyfile FILE          Encrypt with key file (32 bytes)
 ```
 
 **`bfc list [options] <container.bfc> [path]`**
@@ -488,8 +504,9 @@ See the [examples/](examples/) directory for complete examples.
 ```
 -C, --directory DIR    Extract to specific directory
 -f, --force           Overwrite existing files
--k, --keep-paths      Preserve directory structure
+    --flatten         Drop directories, extract files by name only
 -p, --password PASS   Password for encrypted containers
+    --password-file FILE  Read the password from FILE (- for stdin)
 -K, --keyfile FILE    Key file for encrypted containers
 ```
 
@@ -501,23 +518,26 @@ See the [examples/](examples/) directory for complete examples.
 **`bfc verify [options] <container.bfc>`**
 ```
 --deep                Deep verification (check all content)
--p, --progress        Show progress indicator
+    --progress        Show progress indicator
+-p, --password PASS   Password for encrypted containers
+    --password-file FILE  Read the password from FILE (- for stdin)
+-K, --keyfile FILE    Key file for encrypted containers
 ```
 
 ### Common Usage Patterns
 
 ```bash
 # Create compressed encrypted archive
-bfc create -c zstd -e password archive.bfc /data/
+bfc create -c zstd -p password archive.bfc /data/
 
 # List with full details
 bfc list -lsc archive.bfc
 
-# Extract preserving structure to specific location
-bfc extract -k -C /tmp/restored archive.bfc
+# Extract to a specific location
+bfc extract -C /tmp/restored archive.bfc
 
 # Verify with progress
-bfc verify -p --deep archive.bfc
+bfc verify --progress --deep archive.bfc
 
 # Get detailed info about specific file
 bfc info -d archive.bfc path/to/file.txt

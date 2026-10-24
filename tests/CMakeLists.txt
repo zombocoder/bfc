@@ -17,6 +17,11 @@ include(CTest)
 # Add unit tests
 add_subdirectory(unit)
 
+# Add command-line tests (POSIX shell)
+if(NOT WIN32)
+    add_subdirectory(cli)
+endif()
+
 # Add fuzz tests if available
 find_program(AFL_FUZZ afl-fuzz)
 if(AFL_FUZZ AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fuzz)

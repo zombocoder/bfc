@@ -37,9 +37,7 @@ typedef struct {
   int compression_level;
   size_t compression_threshold;
   // Encryption options
-  const char* encryption_password;
-  const char* encryption_keyfile;
-  int use_encryption;
+  cli_credentials_t creds;
 } create_options_t;
 
 static void print_create_help(void) {
@@ -51,16 +49,18 @@ static void print_create_help(void) {
   printf("  -c, --compression TYPE      Compression type: none, zstd, auto (default: none)\n");
   printf("  -l, --compression-level N   Compression level (1-22 for zstd, default: 3)\n");
   printf("  -t, --compression-threshold SIZE  Min file size to compress (default: 64)\n");
-  printf("  -e, --encrypt PASSWORD      Encrypt with password\n");
-  printf("  -k, --keyfile FILE          Encrypt with key from file (32 bytes)\n");
+  printf("  -p, --password PASS         Encrypt with password\n");
+  printf("      --password-file FILE    Read the password from FILE (- for stdin)\n");
+  printf("  -K, --keyfile FILE          Encrypt with key from file (32 bytes)\n");
   printf("  -h, --help                  Show this help message\n\n");
   printf("Examples:\n");
   printf("  bfc create archive.bfc /path/to/files/\n");
   printf("  bfc create -f archive.bfc file1.txt file2.txt dir/\n");
   printf("  bfc create -b 8192 archive.bfc /home/user/documents/\n");
   printf("  bfc create -c zstd -l 9 archive.bfc /data/\n");
-  printf("  bfc create -e mypassword archive.bfc /secure/data/\n");
-  printf("  bfc create -c zstd -e secret -l 6 archive.bfc /compressed-encrypted/\n");
+  printf("  bfc create -p mypassword archive.bfc /secure/data/\n");
+  printf("  bfc create -c zstd -p secret -l 6 archive.bfc /compressed-encrypted/\n");
+  printf("  bfc create --password-file pass.txt archive.bfc /secure/data/\n");
 }
 
 static int parse_create_options(int argc, char* argv[], create_options_t* opts) {
@@ -75,11 +75,9 @@ static int parse_create_options(int argc, char* argv[], create_options_t* opts) 
   opts->compression_level = 3;
   opts->compression_threshold = 64;
   // Encryption defaults
-  opts->encryption_password = NULL;
-  opts->encryption_keyfile = NULL;
-  opts->use_encryption = 0;
+  cli_credentials_init(&opts->creds);
 
-  int i;
+  int i, cred;
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
       print_create_help();
@@ -129,19 +127,25 @@ static int parse_create_options(int argc, char* argv[], create_options_t* opts) 
         return -1;
       }
     } else if (strcmp(argv[i], "-e") == 0 || strcmp(argv[i], "--encrypt") == 0) {
+      // Deprecated spelling of -p/--password
       if (i + 1 >= argc) {
-        print_error("--encrypt requires a password argument");
+        print_error("%s requires a password argument", argv[i]);
         return -1;
       }
-      opts->encryption_password = argv[++i];
-      opts->use_encryption = 1;
-    } else if (strcmp(argv[i], "-k") == 0 || strcmp(argv[i], "--keyfile") == 0) {
+      fprintf(stderr, "Warning: %s is deprecated, use -p/--password\n", argv[i]);
+      opts->creds.password = argv[++i];
+    } else if (strcmp(argv[i], "-k") == 0) {
+      // Deprecated spelling of -K/--keyfile
       if (i + 1 >= argc) {
-        print_error("--keyfile requires a file path argument");
+        print_error("-k requires a file path argument");
         return -1;
       }
-      opts->encryption_keyfile = argv[++i];
-      opts->use_encryption = 1;
+      fprintf(stderr, "Warning: -k is deprecated, use -K/--keyfile\n");
+      opts->creds.keyfile = argv[++i];
+    } else if ((cred = cli_parse_credential_option(argc, argv, &i, &opts->creds)) != 0) {
+      if (cred < 0) {
+        return -1;
+      }
     } else if (argv[i][0] == '-') {
       print_error("Unknown option: %s", argv[i]);
       return -1;
@@ -164,8 +168,7 @@ static int parse_create_options(int argc, char* argv[], create_options_t* opts) 
   }
 
   // Validate encryption options
-  if (opts->encryption_password && opts->encryption_keyfile) {
-    print_error("Cannot specify both --encrypt and --keyfile");
+  if (cli_credentials_check(&opts->creds) != 0) {
     return -1;
   }
 
@@ -367,7 +370,7 @@ int cmd_create(int argc, char* argv[]) {
   }
 
   // Add encryption feature if encryption is enabled
-  if (opts.use_encryption) {
+  if (cli_credentials_given(&opts.creds)) {
     features |= BFC_FEATURE_AEAD;
   }
 
@@ -399,43 +402,11 @@ int cmd_create(int argc, char* argv[]) {
   }
 
   // Configure encryption settings
-  if (opts.use_encryption) {
-#ifndef BFC_WITH_SODIUM
-    print_error("Encryption support not available. Rebuild with -DBFC_WITH_SODIUM=ON");
+  int enc_result = cli_apply_writer_credentials(writer, &opts.creds);
+  cli_credentials_free(&opts.creds);
+  if (enc_result < 0) {
     bfc_close(writer);
     return 1;
-#else
-    if (opts.encryption_password) {
-      // Use password-based encryption
-      result = bfc_set_encryption_password(writer, opts.encryption_password,
-                                           strlen(opts.encryption_password));
-      if (result != BFC_OK) {
-        print_error("Failed to set encryption password: %s", bfc_error_string(result));
-        bfc_close(writer);
-        return 1;
-      }
-      print_verbose("Encryption: ChaCha20-Poly1305 with password-based key derivation");
-    } else if (opts.encryption_keyfile) {
-      // Use key file
-      uint8_t key[32];
-      if (read_key_from_file(opts.encryption_keyfile, key) != 0) {
-        bfc_close(writer);
-        return 1;
-      }
-
-      result = bfc_set_encryption_key(writer, key);
-
-      // Clear key from memory
-      memset(key, 0, sizeof(key));
-
-      if (result != BFC_OK) {
-        print_error("Failed to set encryption key: %s", bfc_error_string(result));
-        bfc_close(writer);
-        return 1;
-      }
-      print_verbose("Encryption: ChaCha20-Poly1305 with key from file");
-    }
-#endif
   }
 
   // Add input paths

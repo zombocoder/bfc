@@ -59,6 +59,27 @@ int parse_global_options(int* argc, char*** argv, bfc_options_t* opts);
 const char* bfc_error_string(int error_code);
 int read_key_from_file(const char* keyfile, uint8_t key[32]);
 
+// Password and key-file options, shared by create, extract and verify
+typedef struct {
+  const char* password;      // -p, --password
+  const char* password_file; // --password-file ("-" for stdin)
+  const char* keyfile;       // -K, --keyfile
+  char* owned_password;      // read from file or prompt; wiped on free
+} cli_credentials_t;
+
+void cli_credentials_init(cli_credentials_t* c);
+void cli_credentials_free(cli_credentials_t* c);
+// Returns 1 if argv[*i] was a credential option (and consumes its value),
+// 0 if it was not, -1 on error.
+int cli_parse_credential_option(int argc, char* argv[], int* i, cli_credentials_t* c);
+int cli_credentials_given(const cli_credentials_t* c);
+int cli_credentials_check(const cli_credentials_t* c);
+// prompt_if_needed: ask on the terminal when the container is encrypted and
+// no credentials were given (only when stdin is a terminal).
+// Both return 1 if a password or key was set, 0 if none was given, -1 on error.
+int cli_apply_reader_credentials(bfc_t* reader, cli_credentials_t* c, int prompt_if_needed);
+int cli_apply_writer_credentials(bfc_t* writer, cli_credentials_t* c);
+
 // Global options (extern declaration)
 extern bfc_options_t g_options;
 

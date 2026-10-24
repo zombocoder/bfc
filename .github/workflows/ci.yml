@@ -115,10 +115,10 @@ jobs:
           cd extract_test
           ../build/bin/bfc extract ../test.bfc
 
-          # Verify extracted files
-          [ -f hello.txt ] && echo "hello.txt extracted"
-          [ -f bye.txt ] && echo "bye.txt extracted"
-          [ -f subdir/nested.txt ] && echo "nested.txt extracted"
+          # Verify extracted files (directory paths are preserved)
+          [ -f test_data/hello.txt ] && echo "hello.txt extracted"
+          [ -f test_data/bye.txt ] && echo "bye.txt extracted"
+          [ -f test_data/subdir/nested.txt ] && echo "nested.txt extracted"
 
           cd ..
           rm -rf extract_test
@@ -153,12 +153,13 @@ jobs:
           ./build/bin/bfc info test_symlinks.bfc | grep "Symlinks:" && echo "Symlinks counted in container info" || echo "Symlink counting failed"
           
           # Test symlink-specific info
-          ./build/bin/bfc info test_symlinks.bfc simple_link.txt | grep "Type: Symlink" && echo "Symlink type displayed correctly" || echo "Symlink type display failed"
+          ./build/bin/bfc info test_symlinks.bfc test_symlinks/simple_link.txt | grep "Type: Symlink" && echo "Symlink type displayed correctly" || echo "Symlink type display failed"
 
           # Test symlink extraction
           mkdir -p extract_symlinks
           cd extract_symlinks
           ../build/bin/bfc extract ../test_symlinks.bfc
+          cd test_symlinks
           
           # Verify symlinks were extracted correctly
           [ -L simple_link.txt ] && echo "Simple symlink extracted as symlink" || echo "Simple symlink not extracted as symlink"
@@ -175,11 +176,11 @@ jobs:
             [ "$TARGET" = "/tmp/absolute_target" ] && echo "Absolute symlink target correct" || echo "Absolute symlink target incorrect: $TARGET"
           fi
           
-          cd ..
+          cd ../..
           rm -rf extract_symlinks
           
           # Test symlinks with compression and encryption
-          ./build/bin/bfc create -c zstd -e testpass symlinks_comp_enc.bfc test_symlinks/simple_link.txt test_symlinks/absolute_link.txt
+          ./build/bin/bfc create -c zstd -p testpass symlinks_comp_enc.bfc test_symlinks/simple_link.txt test_symlinks/absolute_link.txt
           echo "Symlinks work with compression and encryption"
           
           mkdir -p extract_comp_enc
@@ -194,7 +195,7 @@ jobs:
 
           # Test encryption functionality
           echo "Testing encryption features..."
-          ./build/bin/bfc create -e testpassword123 test_encrypted.bfc test_data/
+          ./build/bin/bfc create -p testpassword123 test_encrypted.bfc test_data/
           ./build/bin/bfc info test_encrypted.bfc
           ./build/bin/bfc info test_encrypted.bfc test_data/hello.txt | grep -i encrypt
 
@@ -204,9 +205,9 @@ jobs:
           ../build/bin/bfc extract -p testpassword123 ../test_encrypted.bfc
 
           # Verify extracted files from encrypted container
-          [ -f hello.txt ] && echo "hello.txt extracted from encrypted container"
-          [ -f bye.txt ] && echo "bye.txt extracted from encrypted container"
-          [ -f subdir/nested.txt ] && echo "nested.txt extracted from encrypted container"
+          [ -f test_data/hello.txt ] && echo "hello.txt extracted from encrypted container"
+          [ -f test_data/bye.txt ] && echo "bye.txt extracted from encrypted container"
+          [ -f test_data/subdir/nested.txt ] && echo "nested.txt extracted from encrypted container"
 
           cd ..
           rm -rf extract_encrypted
@@ -220,19 +221,19 @@ jobs:
 
           # Test key file encryption
           echo -n "0123456789abcdef0123456789abcdef" > test.key
-          ./build/bin/bfc create -k test.key test_keyfile.bfc test_data/
+          ./build/bin/bfc create -K test.key test_keyfile.bfc test_data/
           ./build/bin/bfc info test_keyfile.bfc | grep -i encrypt
 
           mkdir -p extract_keyfile
           cd extract_keyfile
           ../build/bin/bfc extract -K ../test.key ../test_keyfile.bfc
-          [ -f hello.txt ] && echo "hello.txt extracted with key file"
+          [ -f test_data/hello.txt ] && echo "hello.txt extracted with key file"
           cd ..
           rm -rf extract_keyfile
 
           # Test encryption with compression
           echo "This is a larger test file with enough content to be compressed by zstd compression algorithm." > test_data/large.txt
-          ./build/bin/bfc create -e testpass -c zstd test_enc_comp.bfc test_data/
+          ./build/bin/bfc create -p testpass -c zstd test_enc_comp.bfc test_data/
           ./build/bin/bfc info test_enc_comp.bfc test_data/large.txt | grep -i encrypt
           ./build/bin/bfc info test_enc_comp.bfc test_data/large.txt | grep -i zstd
 
@@ -264,15 +265,15 @@ jobs:
 
           mkdir extract_test && cd extract_test
           "$OLDPWD/$BFC" extract ../test.bfc
-          [ -f hello.txt ]          && echo "hello.txt extracted"
-          [ -f bye.txt ]            && echo "bye.txt extracted"
-          [ -f subdir/nested.txt ]  && echo "nested.txt extracted"
+          [ -f test_data/hello.txt ]          && echo "hello.txt extracted"
+          [ -f test_data/bye.txt ]            && echo "bye.txt extracted"
+          [ -f test_data/subdir/nested.txt ]  && echo "nested.txt extracted"
           cd ..
 
-          "$BFC" create -e testpassword123 test_encrypted.bfc test_data/
+          "$BFC" create -p testpassword123 test_encrypted.bfc test_data/
           mkdir extract_enc && cd extract_enc
           "$OLDPWD/$BFC" extract -p testpassword123 ../test_encrypted.bfc
-          [ -f hello.txt ] && echo "hello.txt extracted from encrypted container"
+          [ -f test_data/hello.txt ] && echo "hello.txt extracted from encrypted container"
           cd ..
 
           mkdir extract_fail && cd extract_fail
