@@ -120,6 +120,41 @@ check_fails "extract fails on an entry below a symlink" test $? -eq 0
 check "  the refusal names the symlink" grep -q "symlink" "$T/err"
 check_fails "  nothing is written through the symlink" test -e outside/file.txt
 
+# --- symlinks over existing entries ----------------------------------------
+
+mkdir -p l/tree
+echo target >l/tree/target.txt
+ln -s target.txt l/tree/link
+"$BFC" create l.bfc l >/dev/null
+
+mkdir -p s1/l/tree
+ln -s elsewhere s1/l/tree/link
+check_fails "an existing symlink is not replaced without -f" \
+  "$BFC" extract -C s1 l.bfc
+check "  the existing symlink is left alone" test "$(readlink s1/l/tree/link)" = elsewhere
+
+mkdir -p s2/l/tree
+ln -s elsewhere s2/l/tree/link
+check "an existing symlink is replaced with -f" "$BFC" extract -f -C s2 l.bfc
+check "  it now points at the archived target" test "$(readlink s2/l/tree/link)" = target.txt
+
+mkdir -p s3/l/tree
+echo regular >s3/l/tree/link
+check_fails "an existing regular file is not replaced by a symlink without -f" \
+  "$BFC" extract -C s3 l.bfc
+check "  the file is left alone" grep -qx regular s3/l/tree/link
+check "an existing regular file is replaced by the symlink with -f" \
+  "$BFC" extract -f -C s3 l.bfc
+check "  it is a symlink now" test -L s3/l/tree/link
+
+mkdir -p s4/l/tree/link
+echo keep >s4/l/tree/link/inside.txt
+check_fails "a non-empty directory is never replaced by a symlink, even with -f" \
+  "$BFC" extract -f -C s4 l.bfc
+check "  the directory and its contents are intact" grep -qx keep s4/l/tree/link/inside.txt
+leftover=$(find s1 s2 s3 s4 -name '*.bfc-tmp*' | wc -l | tr -d ' ')
+check "no temporary symlinks are left behind" test "$leftover" = 0
+
 # --- #17: file modes and umask ---------------------------------------------
 
 # Permission bits of a path as octal, on both GNU and BSD stat
