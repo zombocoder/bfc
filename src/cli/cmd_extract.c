@@ -198,6 +198,7 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
   // Open output file atomically: O_EXCL rejects existing files when !force,
   // O_NOFOLLOW prevents symlink attacks (POSIX). No separate stat() needed.
 #ifdef _WIN32
+  (void) mode; // Windows has no POSIX permissions to apply
   int oflags = O_WRONLY | O_CREAT | O_BINARY | (force ? O_TRUNC : O_EXCL);
   int fd = open(output_path, oflags, _S_IREAD | _S_IWRITE);
 #else
