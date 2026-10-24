@@ -442,6 +442,17 @@ int cmd_create(int argc, char* argv[]) {
     strncpy(clean_path, input_path, sizeof(clean_path) - 1);
     clean_path[sizeof(clean_path) - 1] = '\0';
 
+#ifdef _WIN32
+    // Windows also accepts '\' as a separator ("data\" in PowerShell), but
+    // container paths always use '/'. Without this, "data\" became the
+    // directory name and entries were stored as "data\/file.txt".
+    for (char* p = clean_path; *p; p++) {
+      if (*p == '\\') {
+        *p = '/';
+      }
+    }
+#endif
+
     // Remove trailing slashes
     size_t len = strlen(clean_path);
     while (len > 1 && clean_path[len - 1] == '/') {
