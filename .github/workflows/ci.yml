@@ -354,14 +354,22 @@ jobs:
           lcov --capture --directory . --output-file coverage.info \
             --rc branch_coverage=1 \
             --ignore-errors deprecated,unsupported,unused
+          # Thresholds apply to the library. The CLI only shows up in coverage
+          # since tests/cli runs the bfc binary; it is reported separately
+          # below and does not count towards the thresholds.
           lcov --remove coverage.info \
-            '*/tests/*' \
+            '*/tests/*' '*/src/cli/*' \
             --output-file coverage_filtered.info \
             --rc branch_coverage=1 \
             --ignore-errors deprecated,unsupported,unused
           lcov --list coverage_filtered.info \
             --rc branch_coverage=1 \
             --ignore-errors deprecated,unsupported,unused
+          echo "CLI coverage (informational, not checked):"
+          lcov --extract coverage.info '*/src/cli/*' \
+            --output-file coverage_cli.info \
+            --rc branch_coverage=1 \
+            --ignore-errors deprecated,unsupported,unused,empty || true
 
       - name: Check coverage thresholds
         run: |
