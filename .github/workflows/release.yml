@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*"
+  # Build and check the packages, without publishing, when this workflow
+  # changes, so packaging problems show up before a release is tagged
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
 
 jobs:
   build-release:
@@ -226,7 +231,14 @@ jobs:
       - name: Get version
         id: get_version
         shell: bash
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            # Not a release: name the packages after the project version
+            v=$(sed -n 's/^project(bfc VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+            echo "version=v${v}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Create release package (non-Windows)
         if: matrix.platform != 'windows'
@@ -284,6 +296,7 @@ jobs:
           tar -czf ${PACKAGE_NAME}.tar.gz ${PACKAGE_NAME}
 
       - name: Create release package (Windows)
+        id: windows_package
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
@@ -299,6 +312,16 @@ jobs:
           Copy-Item (Get-ChildItem -Recurse build\lib -Filter bfc.lib | Select-Object -First 1 -ExpandProperty FullName) "$pkgName\bfc.lib"
           Copy-Item (Get-ChildItem -Recurse build\lib -Filter bfc.dll -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName) "$pkgName\bfc.dll" -ErrorAction SilentlyContinue
 
+          # bfc.exe links zstd and libsodium dynamically (vcpkg x64-windows
+          # triplet). Without these next to it, it fails to start with
+          # 0xC0000135 STATUS_DLL_NOT_FOUND (#20).
+          $vcpkgBin = Join-Path $env:VCPKG_INSTALLATION_ROOT "installed\x64-windows\bin"
+          foreach ($dll in @("zstd.dll", "libsodium.dll")) {
+            $src = Join-Path $vcpkgBin $dll
+            if (-not (Test-Path $src)) { Write-Error "$dll not found in $vcpkgBin"; exit 1 }
+            Copy-Item $src "$pkgName\"
+          }
+
           # Copy headers and docs
           Copy-Item include\bfc.h "$pkgName\"
           Copy-Item README.md "$pkgName\"
@@ -308,16 +331,59 @@ jobs:
           @'
           @echo off
           echo Installing BFC...
-          copy bfc.exe "%ProgramFiles%\bfc\bfc.exe" 2>nul || (
-            mkdir "%ProgramFiles%\bfc"
-            copy bfc.exe "%ProgramFiles%\bfc\bfc.exe"
+          if not exist "%ProgramFiles%\bfc" mkdir "%ProgramFiles%\bfc" || goto :fail
+          rem bfc.exe needs zstd.dll and libsodium.dll in the same directory
+          for %%f in (bfc.exe zstd.dll libsodium.dll bfc.h) do (
+            copy /Y "%~dp0%%f" "%ProgramFiles%\bfc\" >nul || goto :fail
           )
-          copy bfc.h "%ProgramFiles%\bfc\bfc.h"
           echo BFC installed to %ProgramFiles%\bfc
+          echo Add %ProgramFiles%\bfc to PATH to run bfc from any directory.
+          exit /b 0
+          :fail
+          echo Installation failed. Run install.bat as Administrator.
+          exit /b 1
           '@ | Out-File -Encoding ascii "$pkgName\install.bat"
 
           # Create ZIP
           Compress-Archive -Path $pkgName -DestinationPath "$pkgName.zip"
+          "name=$pkgName" >> $env:GITHUB_OUTPUT
+
+      - name: Test release package with a clean PATH (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          # Run bfc.exe from the unpacked zip the way a user would get it: no
+          # vcpkg or build directory on PATH, only the system directories (#20)
+          $pkgName = "${{ steps.windows_package.outputs.name }}"
+          $dir = Join-Path $env:RUNNER_TEMP "bfc-package-test"
+          Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+          Expand-Archive "$pkgName.zip" -DestinationPath $dir
+          $bfc = Join-Path $dir "$pkgName\bfc.exe"
+          $env:PATH = "C:\Windows\System32;C:\Windows"
+
+          function Invoke-Bfc {
+            & $bfc @args
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error ("bfc {0} failed with exit code {1} (0x{2:X8})" -f ($args -join ' '), $LASTEXITCODE, $LASTEXITCODE)
+              exit 1
+            }
+          }
+
+          Push-Location $dir
+          New-Item -ItemType Directory -Force pkg_data | Out-Null
+          "packaged bfc.exe works" | Out-File -Encoding ascii pkg_data\hello.txt
+
+          Invoke-Bfc --version
+          Invoke-Bfc create -c zstd -p secret pkg.bfc pkg_data
+          Invoke-Bfc verify --deep -p secret pkg.bfc
+          New-Item -ItemType Directory -Force pkg_out | Out-Null
+          Invoke-Bfc extract -p secret -C pkg_out pkg.bfc
+
+          $want = Get-Content -Raw pkg_data\hello.txt
+          $got = Get-Content -Raw pkg_out\pkg_data\hello.txt
+          if ($got -ne $want) { Write-Error "extracted content differs"; exit 1 }
+          Write-Output "Release package runs with a clean PATH"
+          Pop-Location
 
       - name: Create DEB and RPM packages (Linux only)
         if: matrix.platform == 'linux'
@@ -460,6 +526,7 @@ jobs:
           hdiutil create -volname "BFC ${VERSION_NO_V}" -srcfolder dmg-contents -ov -format UDZO "${DMG_NAME}.dmg"
 
       - name: Upload Release Assets
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

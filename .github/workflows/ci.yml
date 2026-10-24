@@ -263,6 +263,19 @@ jobs:
             { echo "ERROR: hello.txt not recorded as 0644"; exit 1; }
           "$BFC" list -l test.bfc | grep -q -- '^drwxr-xr-x .*test_data/subdir' ||
             { echo "ERROR: subdir not recorded as 0755"; exit 1; }
+
+          # A Windows-style path ("test_data\", as typed in PowerShell) must be
+          # stored with '/' separators, and extract back into test_data/
+          "$BFC" create backslash.bfc 'test_data\'
+          "$BFC" list backslash.bfc
+          if "$BFC" list backslash.bfc | grep -qF '\'; then
+            echo "ERROR: container paths contain a backslash"; exit 1
+          fi
+          mkdir extract_backslash
+          "$BFC" extract -C extract_backslash backslash.bfc
+          [ -f extract_backslash/test_data/subdir/nested.txt ] ||
+            { echo "ERROR: test_data/subdir/nested.txt not extracted"; exit 1; }
+          rm -rf extract_backslash backslash.bfc
           "$BFC" info test.bfc
           "$BFC" verify test.bfc
           "$BFC" verify --deep test.bfc

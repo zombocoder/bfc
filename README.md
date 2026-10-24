@@ -109,6 +109,11 @@ cmake --build build --config Release
 ```
 
 > **Windows notes:**
+> - The release zip (`bfc-<version>-windows-x86_64.zip`) ships `bfc.exe` together with
+>   `zstd.dll` and `libsodium.dll`; keep them in the same directory. `install.bat` copies all
+>   three to `%ProgramFiles%\bfc`. The
+>   [Microsoft Visual C++ 2015-2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+>   must be installed (`VCRUNTIME140.dll`); it is present on most systems already.
 > - Symlink creation requires Developer Mode or elevated privileges; symlinks stored in
 >   containers are extracted as regular files on Windows without Developer Mode.
 > - FUSE mount (`BFC_WITH_FUSE`) is not supported on Windows.
