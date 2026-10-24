@@ -370,24 +370,48 @@ static int extract_directory(const char* output_path, const bfc_entry_t* entry, 
 #endif
 }
 
-static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* output_path,
-                           int force) {
-  // Check if file exists
-  struct stat st;
-  if (lstat(output_path, &st) == 0) {
-    if (!S_ISLNK(st.st_mode)) {
-      if (!force) {
-        print_error("'%s' exists but is not a symlink. Use -f to overwrite.", output_path);
-        return -1;
-      }
+#ifndef _WIN32
+// Put a symlink in place of whatever is at output_path, without a separate
+// check of what is there: create it under a temporary name next to it and
+// rename() it over. rename() replaces a file or symlink atomically, does not
+// follow symlinks, and fails on a directory, so a swap between steps cannot
+// redirect the write.
+static int replace_with_symlink(const char* target, const char* output_path) {
+  char tmp[1100];
+  for (unsigned attempt = 0; attempt < 100; attempt++) {
+    int n = snprintf(tmp, sizeof(tmp), "%s.bfc-tmp.%ld.%u", output_path, (long) getpid(), attempt);
+    if (n < 0 || (size_t) n >= sizeof(tmp)) {
+      errno = ENAMETOOLONG;
+      return -1;
     }
-    // Remove existing file/symlink
-    if (unlink(output_path) != 0) {
-      print_error("Cannot remove '%s': %s", output_path, strerror(errno));
+    if (symlink(target, tmp) == 0) {
+      if (rename(tmp, output_path) == 0) {
+        return 0;
+      }
+      int saved = errno;
+      unlink(tmp);
+      errno = saved;
+      return -1;
+    }
+    if (errno != EEXIST) {
       return -1;
     }
   }
+  errno = EEXIST;
+  return -1;
+}
+#endif
 
+static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* output_path,
+                           int force) {
+#ifdef _WIN32
+  // Nothing to create, so leave whatever is at output_path untouched
+  (void) reader;
+  (void) output_path;
+  (void) force;
+  print_verbose("Warning: symlinks are not supported on Windows, skipping '%s'", entry->path);
+  return 0;
+#else
   // Read symlink target from container
   char* target = malloc(entry->size + 1);
   if (!target) {
@@ -403,12 +427,24 @@ static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* 
   }
   target[entry->size] = '\0';
 
-// Create symlink
-#ifndef _WIN32
+  // Create the symlink; only if something is already there, and -f was given,
+  // replace it. Like regular files, existing entries need -f.
   if (symlink(target, output_path) != 0) {
-    print_error("Cannot create symlink '%s' -> '%s': %s", output_path, target, strerror(errno));
-    free(target);
-    return -1;
+    if (errno != EEXIST) {
+      print_error("Cannot create symlink '%s' -> '%s': %s", output_path, target, strerror(errno));
+      free(target);
+      return -1;
+    }
+    if (!force) {
+      print_error("'%s' already exists. Use -f to overwrite.", output_path);
+      free(target);
+      return -1;
+    }
+    if (replace_with_symlink(target, output_path) != 0) {
+      print_error("Cannot replace '%s' with a symlink: %s", output_path, strerror(errno));
+      free(target);
+      return -1;
+    }
   }
 
   // Set timestamps using lutimes (for symlinks)
@@ -423,9 +459,6 @@ static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* 
     print_verbose("Warning: cannot set timestamps on symlink '%s': %s", output_path,
                   strerror(errno));
   }
-#else
-  print_verbose("Warning: symlinks are not supported on Windows, skipping '%s'", entry->path);
-#endif
 
   if (!g_options.quiet) {
     printf("Extracted: %s -> %s\n", output_path, target);
@@ -433,6 +466,7 @@ static int extract_symlink(bfc_t* reader, const bfc_entry_t* entry, const char* 
 
   free(target);
   return 0;
+#endif
 }
 
 // Refuse entry paths that could land outside the output directory. The writer
