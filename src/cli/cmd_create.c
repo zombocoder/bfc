@@ -180,6 +180,23 @@ static int parse_create_options(int argc, char* argv[], create_options_t* opts) 
   return 0;
 }
 
+// Permission bits to record for a file or directory. On Windows, stat() has
+// no POSIX permissions: the CRT reports 0666 or 0777 (or 0444/0555 for
+// read-only files), so record the conventional 0644/0755 instead, keeping the
+// executable bit the CRT derives from the file type and the read-only
+// attribute.
+static uint32_t archive_mode(const struct stat* st) {
+#ifdef _WIN32
+  uint32_t mode = (S_ISDIR(st->st_mode) || (st->st_mode & S_IXUSR)) ? 0755 : 0644;
+  if (!(st->st_mode & S_IWUSR)) {
+    mode &= ~0222u;
+  }
+  return mode;
+#else
+  return st->st_mode & 0777;
+#endif
+}
+
 static int add_file_to_container(bfc_t* writer, const char* file_path, const char* container_path) {
   print_verbose("Adding file: %s -> %s", file_path, container_path);
 
@@ -200,7 +217,7 @@ static int add_file_to_container(bfc_t* writer, const char* file_path, const cha
   // Add file to container
   uint64_t mtime_ns = (uint64_t) st.st_mtime * 1000000000ULL;
   uint32_t crc;
-  int result = bfc_add_file(writer, container_path, file, st.st_mode & 0777, mtime_ns, &crc);
+  int result = bfc_add_file(writer, container_path, file, archive_mode(&st), mtime_ns, &crc);
 
   fclose(file);
 
@@ -306,7 +323,7 @@ static int add_directory_to_container(bfc_t* writer, const char* dir_path,
 
   // Add directory to container
   uint64_t mtime_ns = (uint64_t) st.st_mtime * 1000000000ULL;
-  int result = bfc_add_dir(writer, container_path, st.st_mode & 0777, mtime_ns);
+  int result = bfc_add_dir(writer, container_path, archive_mode(&st), mtime_ns);
 
   if (result != BFC_OK) {
     print_error("Failed to add directory '%s': %s", container_path, bfc_error_string(result));
