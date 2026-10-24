@@ -120,6 +120,57 @@ check_fails "extract fails on an entry below a symlink" test $? -eq 0
 check "  the refusal names the symlink" grep -q "symlink" "$T/err"
 check_fails "  nothing is written through the symlink" test -e outside/file.txt
 
+# --- #17: file modes and umask ---------------------------------------------
+
+# Permission bits of a path as octal, on both GNU and BSD stat
+perm() {
+  stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null
+}
+
+check_perm() {
+  # check_perm <description> <expected> <path>
+  got=$(perm "$3")
+  if [ "$got" = "$2" ]; then ok "$1"; else not_ok "$1 (got $got, expected $2)"; fi
+}
+
+mkdir -p m/opendir
+echo w >m/world.txt
+echo x >m/run.sh
+echo r >m/readonly.txt
+chmod 666 m/world.txt
+chmod 755 m/run.sh
+chmod 444 m/readonly.txt
+chmod 777 m/opendir
+"$BFC" create m.bfc m >/dev/null
+chmod 755 m/opendir
+
+mkdir p1
+(umask 022 && "$BFC" extract -C p1 m.bfc >/dev/null 2>&1)
+check_perm "extract applies the umask to a 0666 file" 644 p1/m/world.txt
+check_perm "  executable bits are kept" 755 p1/m/run.sh
+check_perm "  a read-only file stays read-only" 444 p1/m/readonly.txt
+check_perm "  a new 0777 directory gets the umask" 755 p1/m/opendir
+
+mkdir p2
+(umask 077 && "$BFC" extract -C p2 m.bfc >/dev/null 2>&1)
+check_perm "a stricter umask (077) is honoured for files" 600 p2/m/world.txt
+check_perm "  and for directories" 700 p2/m/opendir
+
+mkdir -p p3/m/opendir
+chmod 750 p3/m/opendir
+(umask 022 && "$BFC" extract -f -C p3 m.bfc >/dev/null 2>&1)
+check_perm "an existing directory keeps its mode" 750 p3/m/opendir
+
+mkdir p4
+(umask 022 && "$BFC" extract --preserve-permissions -C p4 m.bfc >/dev/null 2>&1)
+check_perm "--preserve-permissions keeps the archived file mode" 666 p4/m/world.txt
+check_perm "  and the archived directory mode" 777 p4/m/opendir
+
+mkdir -p p5/m/opendir
+chmod 750 p5/m/opendir
+(umask 022 && "$BFC" extract -f --preserve-permissions -C p5 m.bfc >/dev/null 2>&1)
+check_perm "--preserve-permissions also applies to an existing directory" 777 p5/m/opendir
+
 # --- #19: password and key-file options --------------------------------------
 
 if "$BFC" create -p x probe.bfc src/top.txt 2>&1 | grep -q "Encryption support not available"; then

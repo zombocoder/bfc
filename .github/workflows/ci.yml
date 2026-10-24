@@ -255,6 +255,14 @@ jobs:
 
           "$BFC" create test.bfc test_data/
           "$BFC" list test.bfc
+
+          # Windows has no POSIX permissions; create must record 0644/0755,
+          # not the CRT's emulated 0666/0777 (#17)
+          "$BFC" list -l test.bfc
+          "$BFC" list -l test.bfc | grep -q -- '^-rw-r--r-- .*test_data/hello.txt' ||
+            { echo "ERROR: hello.txt not recorded as 0644"; exit 1; }
+          "$BFC" list -l test.bfc | grep -q -- '^drwxr-xr-x .*test_data/subdir' ||
+            { echo "ERROR: subdir not recorded as 0755"; exit 1; }
           "$BFC" info test.bfc
           "$BFC" verify test.bfc
           "$BFC" verify --deep test.bfc

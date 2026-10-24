@@ -31,6 +31,7 @@
 typedef struct {
   int force;
   int flatten;
+  int preserve_perms;
   const char* output_dir;
   const char* container_file;
   const char** extract_paths;
@@ -45,6 +46,8 @@ static void print_extract_help(void) {
   printf("  -C, --directory DIR    Change to directory DIR before extracting\n");
   printf("  -f, --force            Overwrite existing files\n");
   printf("      --flatten          Drop directories: extract every file by its name only\n");
+  printf("      --preserve-permissions  Use the exact modes from the container instead\n");
+  printf("                         of applying the umask, also for existing directories\n");
   printf("  -p, --password PASS    Password for encrypted container\n");
   printf("      --password-file FILE  Read the password from FILE (- for stdin)\n");
   printf("  -K, --keyfile FILE     Key file for encrypted container (32 bytes)\n");
@@ -68,6 +71,7 @@ static int parse_extract_options(int argc, char* argv[], extract_options_t* opts
   // Initialize options
   opts->force = 0;
   opts->flatten = 0;
+  opts->preserve_perms = 0;
   opts->output_dir = NULL;
   opts->container_file = NULL;
   opts->extract_paths = NULL;
@@ -87,6 +91,8 @@ static int parse_extract_options(int argc, char* argv[], extract_options_t* opts
               "Warning: %s is deprecated and has no effect: paths are preserved by "
               "default (use -K for a key file)\n",
               argv[i]);
+    } else if (strcmp(argv[i], "--preserve-permissions") == 0) {
+      opts->preserve_perms = 1;
     } else if (strcmp(argv[i], "--flatten") == 0) {
       opts->flatten = 1;
     } else if (strcmp(argv[i], "-C") == 0 || strcmp(argv[i], "--directory") == 0) {
@@ -178,8 +184,10 @@ static int create_parent_directories(const char* path, int force) {
   return 0;
 }
 
-static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* output_path,
-                        int force) {
+// mode is the permission set to apply: the archived mode with the umask taken
+// out, or the exact archived mode with --preserve-permissions.
+static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* output_path, int force,
+                        uint32_t mode) {
   // Create parent directories
   if (create_parent_directories(output_path, force) != 0) {
     return -1;
@@ -194,7 +202,7 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
   int fd = open(output_path, oflags, _S_IREAD | _S_IWRITE);
 #else
   int oflags = O_WRONLY | O_CREAT | O_NOFOLLOW | (force ? O_TRUNC : O_EXCL);
-  int fd = open(output_path, oflags, entry->mode & 0777);
+  int fd = open(output_path, oflags, mode);
 #endif
   if (fd < 0) {
     if (!force && errno == EEXIST) {
@@ -217,7 +225,10 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
 
   // Set file permissions and timestamps using file descriptor to avoid TOCTOU race conditions
 #ifndef _WIN32
-  if (fchmod(fd, entry->mode & 0777) != 0) {
+  // Needed even for new files: open() already applied the umask, but with
+  // --preserve-permissions mode is wider than that, and an overwritten file
+  // (-f) still has its old mode.
+  if (fchmod(fd, mode) != 0) {
     print_verbose("Warning: cannot set permissions on '%s': %s", output_path, strerror(errno));
   }
 #endif
@@ -244,9 +255,12 @@ static int extract_file(bfc_t* reader, const bfc_entry_t* entry, const char* out
   return 0;
 }
 
-static int extract_directory(const char* output_path, const bfc_entry_t* entry, int force) {
+static int extract_directory(const char* output_path, const bfc_entry_t* entry, int force,
+                             uint32_t mode, int preserve_perms) {
 #ifdef _WIN32
   (void) entry; // permissions and timestamps are POSIX-only
+  (void) mode;
+  (void) preserve_perms;
   struct stat st;
   if (stat(output_path, &st) == 0) {
     if (!S_ISDIR(st.st_mode)) {
@@ -283,8 +297,10 @@ static int extract_directory(const char* output_path, const bfc_entry_t* entry, 
   // POSIX: use open() as the atomic probe — no preceding stat() to avoid TOCTOU.
   int dirfd = open(output_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
   if (dirfd >= 0) {
-    // Directory exists — update permissions and timestamps via fd.
-    if (fchmod(dirfd, entry->mode & 0777) != 0) {
+    // Directory exists — update timestamps via fd. Its mode is only changed
+    // with --preserve-permissions, so extracting into an existing tree does
+    // not loosen it (an archive made on Windows records 0777).
+    if (preserve_perms && fchmod(dirfd, mode) != 0) {
       print_verbose("Warning: cannot set permissions on '%s': %s", output_path, strerror(errno));
     }
     struct timespec times[2] = {
@@ -322,7 +338,7 @@ static int extract_directory(const char* output_path, const bfc_entry_t* entry, 
 
   print_verbose("Creating directory: %s", output_path);
 
-  if (mkdir(output_path, entry->mode & 0777) != 0) {
+  if (mkdir(output_path, mode) != 0) {
     print_error("Cannot create directory '%s': %s", output_path, strerror(errno));
     return -1;
   }
@@ -331,6 +347,10 @@ static int extract_directory(const char* output_path, const bfc_entry_t* entry, 
   {
     int dirfd_new = open(output_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
     if (dirfd_new >= 0) {
+      // mkdir() applied the umask; --preserve-permissions wants the exact mode
+      if (preserve_perms && fchmod(dirfd_new, mode) != 0) {
+        print_verbose("Warning: cannot set permissions on '%s': %s", output_path, strerror(errno));
+      }
       struct timespec times[2] = {
           {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL},
           {.tv_sec = entry->mtime_ns / 1000000000ULL, .tv_nsec = entry->mtime_ns % 1000000000ULL}};
@@ -526,6 +546,7 @@ typedef struct {
   int count;
   int errors;
   name_set_t flat_names;
+  uint32_t umask; // process umask, applied unless --preserve-permissions
 } extract_context_t;
 
 static int extract_entry_callback(const bfc_entry_t* entry, void* user) {
@@ -584,12 +605,21 @@ static int extract_entry_callback(const bfc_entry_t* entry, void* user) {
     return 0;
   }
 
+  // Permission bits to apply. Setuid, setgid and sticky bits are never
+  // restored. Without --preserve-permissions the umask is taken out, as tar
+  // does for ordinary users, so an archive made on Windows (0666/0777) does
+  // not produce world-writable files.
+  uint32_t mode = entry->mode & 0777;
+  if (!opts->preserve_perms) {
+    mode &= ~ctx->umask;
+  }
+
   // Extract based on entry type
   int result;
   if (S_ISREG(entry->mode)) {
-    result = extract_file(ctx->reader, entry, output_path, opts->force);
+    result = extract_file(ctx->reader, entry, output_path, opts->force, mode);
   } else if (S_ISDIR(entry->mode)) {
-    result = extract_directory(output_path, entry, opts->force);
+    result = extract_directory(output_path, entry, opts->force, mode, opts->preserve_perms);
   } else if (S_ISLNK(entry->mode)) {
     result = extract_symlink(ctx->reader, entry, output_path, opts->force);
   } else {
@@ -641,7 +671,12 @@ int cmd_extract(int argc, char* argv[]) {
   }
 
   // Extract entries
-  extract_context_t ctx = {&opts, reader, NULL, 0, 0, {NULL, 0, 0}};
+  extract_context_t ctx = {&opts, reader, NULL, 0, 0, {NULL, 0, 0}, 0};
+#ifndef _WIN32
+  mode_t old_umask = umask(0);
+  umask(old_umask);
+  ctx.umask = (uint32_t) old_umask;
+#endif
 
   if (opts.num_paths == 0) {
     // Extract all entries

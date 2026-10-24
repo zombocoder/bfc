@@ -318,12 +318,17 @@ The `extract` command extracts files and directories from containers.
 - `-C, --directory DIR` - Extract to specific directory (changes to DIR before extracting)
 - `-f, --force` - Overwrite existing files without prompting
 - `--flatten` - Drop directories and extract every file by its name only. Fails if two entries have the same name, even with `-f`
+- `--preserve-permissions` - Use the exact permission bits from the container instead of applying the umask, also for directories that already exist
 - `-p, --password PASS` - Provide password for encrypted containers
 - `--password-file FILE` - Read the password from FILE (`-` for stdin)
 - `-K, --keyfile FILE` - Use key file for encrypted containers (32 bytes)
 - `-k, --keep-paths` - Deprecated, no effect: directory paths are preserved by default
 
 Directory paths are recreated under the output directory. Entries with absolute paths or `..` components, and entries that would be written through a symlink, are refused.
+
+File and new directory permissions are the container's permissions with the umask applied, as `tar` does for ordinary users. A file archived as `0666` extracts as `0644` with the usual umask `022`. Directories that already exist keep their permissions. Setuid, setgid and sticky bits are never restored. Use `--preserve-permissions` to get the archived permissions exactly.
+
+Windows has no POSIX permissions. `bfc create` on Windows records `0644` for files and `0755` for directories and executables, without the write bits for read-only files.
 
 **Examples:**
 ```bash
@@ -505,6 +510,7 @@ See the [examples/](examples/) directory for complete examples.
 -C, --directory DIR    Extract to specific directory
 -f, --force           Overwrite existing files
     --flatten         Drop directories, extract files by name only
+    --preserve-permissions  Exact archived modes instead of applying the umask
 -p, --password PASS   Password for encrypted containers
     --password-file FILE  Read the password from FILE (- for stdin)
 -K, --keyfile FILE    Key file for encrypted containers
